@@ -13,10 +13,8 @@ import { ThemeProvider } from '@/components/theme-provider';
 
 export default function RootLayout({
   children,
-  modal,
 }: {
   children: React.ReactNode;
-  modal: React.ReactNode;
 }) {
   return (
     <html lang="en" className={`${inter.variable}`} suppressHydrationWarning>
@@ -28,7 +26,6 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           {children}
-          {modal}
         </ThemeProvider>
       </body>
     </html>

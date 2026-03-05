@@ -54,7 +54,81 @@ import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
-import { createClient } from '@/utils/supabase/client';
+import { auth, db } from '@/lib/firebase';
+import { 
+  onAuthStateChanged, 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  signOut,
+  User as FirebaseUser
+} from 'firebase/auth';
+import { 
+  collection, 
+  query, 
+  where, 
+  orderBy, 
+  onSnapshot, 
+  addDoc, 
+  deleteDoc, 
+  doc, 
+  serverTimestamp,
+  getDocs,
+  setDoc,
+  Timestamp,
+  getDocFromServer
+} from 'firebase/firestore';
+
+// --- Error Handling ---
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map((provider: any) => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 // --- Types ---
 type Role = 'user' | 'ai';
@@ -146,8 +220,7 @@ const aiResponseCache = new Map<string, any>();
 // --- Main Component ---
 export default function Chris() {
   const router = useRouter();
-  const supabase = createClient();
-  const [session, setSession] = useState<any>(null);
+  const [user, setUser] = useState<FirebaseUser | null>(null);
   const [status, setStatus] = useState<"loading" | "authenticated" | "unauthenticated">("loading");
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
@@ -155,6 +228,18 @@ export default function Chris() {
   const [isOnline, setIsOnline] = useState(true);
 
   useEffect(() => {
+    // Test Firestore connection
+    const testConnection = async () => {
+      try {
+        await getDocFromServer(doc(db, 'test', 'connection'));
+      } catch (error) {
+        if(error instanceof Error && error.message.includes('the client is offline')) {
+          console.error("Please check your Firebase configuration.");
+        }
+      }
+    };
+    testConnection();
+
     const checkApiKey = async () => {
       if (typeof window !== 'undefined' && window.aistudio) {
         const hasKey = await window.aistudio.hasSelectedApiKey();
@@ -175,20 +260,13 @@ export default function Chris() {
     // Initial check
     setIsOnline(navigator.onLine);
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setStatus(session ? "authenticated" : "unauthenticated");
-    });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setStatus(session ? "authenticated" : "unauthenticated");
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setUser(user);
+      setStatus(user ? "authenticated" : "unauthenticated");
     });
 
     return () => {
-      subscription.unsubscribe();
+      unsubscribe();
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
@@ -264,34 +342,48 @@ export default function Chris() {
 
   // --- Fetch Chat History ---
   useEffect(() => {
-    if (status === "authenticated") {
-      fetchChatHistory();
-    }
-  }, [status]);
+    if (status === "authenticated" && user) {
+      const q = query(
+        collection(db, "chats"),
+        where("userId", "==", user.uid),
+        orderBy("updatedAt", "desc")
+      );
 
-  const fetchChatHistory = async () => {
-    setIsLoadingHistory(true);
-    try {
-      const res = await fetch("/api/chats");
-      if (res.ok) {
-        const data = await res.json();
-        setChatHistory(data);
-      }
-    } catch (error) {
-      console.error("Failed to fetch history:", error);
-    } finally {
-      setIsLoadingHistory(false);
-    }
-  };
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const history = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        setChatHistory(history);
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, "chats");
+      });
 
-  const loadChat = (chat: any) => {
+      return () => unsubscribe();
+    }
+  }, [status, user]);
+
+  const loadChat = async (chat: any) => {
     setCurrentChatId(chat.id);
-    setMessages(chat.messages.map((m: any) => ({
-      id: m.id,
-      role: m.role,
-      text: m.content,
-      createdAt: m.createdAt
-    })));
+    setIsGenerating(true);
+    try {
+      const messagesRef = collection(db, "chats", chat.id, "messages");
+      const q = query(messagesRef, orderBy("createdAt", "asc"));
+      const snapshot = await getDocs(q);
+      const loadedMessages = snapshot.docs.map(doc => ({
+        id: doc.id,
+        role: doc.data().role,
+        text: doc.data().text,
+        file: doc.data().file,
+        videoUrl: doc.data().videoUrl,
+        createdAt: doc.data().createdAt?.toDate() || new Date()
+      }));
+      setMessages(loadedMessages);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, `chats/${chat.id}/messages`);
+    } finally {
+      setIsGenerating(false);
+    }
     if (window.innerWidth < 768) setIsSidebarOpen(false);
   };
 
@@ -313,6 +405,10 @@ export default function Chris() {
           console.error('Failed to parse cached messages', e);
         }
       }
+    } else if (status === "authenticated") {
+      setMessages([]);
+      setCurrentChatId(null);
+      localStorage.removeItem('chrisai_messages');
     }
   }, [status]);
 
@@ -337,16 +433,13 @@ export default function Chris() {
     if (!confirm("Are you sure you want to delete this chat?")) return;
     
     try {
-      const res = await fetch(`/api/chats/${chatId}`, { method: "DELETE" });
-      if (res.ok) {
-        if (currentChatId === chatId) {
-          setCurrentChatId(null);
-          setMessages([]);
-        }
-        fetchChatHistory();
+      await deleteDoc(doc(db, "chats", chatId));
+      if (currentChatId === chatId) {
+        setCurrentChatId(null);
+        setMessages([]);
       }
     } catch (error) {
-      console.error("Failed to delete chat:", error);
+      handleFirestoreError(error, OperationType.DELETE, `chats/${chatId}`);
     }
   };
 
@@ -591,8 +684,8 @@ export default function Chris() {
     setIsGenerating(true);
 
     try {
-      // Build history for context
-      const historyContents = messages.map(msg => {
+      // Build history for context (limit to last 15 messages)
+      const historyContents = messages.slice(-15).map(msg => {
         const parts: any[] = [];
         if (msg.file) {
           parts.push({
@@ -733,10 +826,14 @@ export default function Chris() {
           };
 
           const currentConfig = { ...config };
-          currentConfig.tools = currentConfig.tools || [];
           // Only add the tool if we are not using maps mode, as maps mode restricts other tools
           if (!isMapsMode && status === "authenticated") {
+            currentConfig.tools = currentConfig.tools || [];
             currentConfig.tools.push({ functionDeclarations: [generateImageFunctionDeclaration, generateVideoFunctionDeclaration] });
+          }
+          
+          if (currentConfig.tools && currentConfig.tools.length === 0) {
+            delete currentConfig.tools;
           }
 
           response = await ai.models.generateContent({
@@ -907,37 +1004,53 @@ export default function Chris() {
       setMessages((prev) => [...prev, aiMessage]);
 
       // --- Save to Database if Authenticated ---
-      if (status === "authenticated") {
-        if (!currentChatId) {
-          // Create new chat
-          const res = await fetch("/api/chats", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+      if (status === "authenticated" && user) {
+        try {
+          let chatId = currentChatId;
+          if (!chatId) {
+            // Create new chat
+            const chatRef = doc(collection(db, "chats"));
+            chatId = chatRef.id;
+            await setDoc(chatRef, {
+              id: chatId,
+              userId: user.uid,
               title: userText.slice(0, 30) + (userText.length > 30 ? "..." : ""),
-              messages: [
-                { role: "user", text: userText },
-                { role: "ai", text: response.text || "" }
-              ]
-            })
-          });
-          if (res.ok) {
-            const newChat = await res.json();
-            setCurrentChatId(newChat.id);
-            fetchChatHistory();
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp()
+            });
+            setCurrentChatId(chatId);
+          } else {
+            // Update chat timestamp
+            await setDoc(doc(db, "chats", chatId), {
+              updatedAt: serverTimestamp()
+            }, { merge: true });
           }
-        } else {
-          // Add messages to existing chat
-          await fetch(`/api/chats/${currentChatId}/messages`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ role: "user", content: userText })
+
+          // Add user message
+          const userMsgRef = doc(collection(db, "chats", chatId, "messages"));
+          await setDoc(userMsgRef, {
+            id: userMsgRef.id,
+            role: "user",
+            text: userText,
+            file: currentFile ? {
+              base64: currentFile.base64,
+              mimeType: currentFile.mimeType,
+              name: currentFile.name
+            } : null,
+            createdAt: serverTimestamp()
           });
-          await fetch(`/api/chats/${currentChatId}/messages`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ role: "ai", content: response.text || "" })
+
+          // Add AI message
+          const aiMsgRef = doc(collection(db, "chats", chatId, "messages"));
+          await setDoc(aiMsgRef, {
+            id: aiMsgRef.id,
+            role: "ai",
+            text: response.text || "",
+            videoUrl: videoUrl || null,
+            createdAt: serverTimestamp()
           });
+        } catch (dbError) {
+          handleFirestoreError(dbError, OperationType.WRITE, `chats/${currentChatId}/messages`);
         }
       }
 
@@ -1107,12 +1220,12 @@ export default function Chris() {
             {status === "authenticated" ? (
               <div className="flex items-center gap-3">
                 <div className="hidden md:flex flex-col items-end">
-                  <span className="text-sm font-bold">{session?.user?.user_metadata?.name}</span>
-                  <span className="text-[10px] text-black/40 dark:text-white/40">{session?.user?.email}</span>
+                  <span className="text-sm font-bold">{user?.displayName}</span>
+                  <span className="text-[10px] text-black/40 dark:text-white/40">{user?.email}</span>
                 </div>
                 <button 
                   onClick={async () => {
-                    await supabase.auth.signOut();
+                    await signOut(auth);
                     router.refresh();
                   }}
                   className="p-2 text-red-500 hover:bg-red-500/10 rounded-full transition-colors"
@@ -1505,9 +1618,9 @@ export default function Chris() {
                     ? 'left-[12px] bottom-[12px] translate-x-0' 
                     : 'left-[12px] bottom-[48px] translate-x-0'
                 }`}
-                title={session.user?.email}
+                title={user?.email || ''}
               >
-                {session.user?.user_metadata?.name?.[0] || session.user?.email?.[0] || "J"}
+                {user?.displayName?.[0] || user?.email?.[0] || "J"}
               </div>
             ) : (
               <Link 

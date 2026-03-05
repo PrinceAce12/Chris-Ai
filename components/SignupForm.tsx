@@ -7,7 +7,9 @@ import { Mirage } from 'ldrs/react'
 import 'ldrs/react/Mirage.css'
 import Link from "next/link"
 
-import { createClient } from "@/utils/supabase/client"
+import { auth, db } from "@/lib/firebase"
+import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth"
+import { doc, setDoc, serverTimestamp } from "firebase/firestore"
 
 export function SignupForm() {
   const [name, setName] = useState("")
@@ -16,7 +18,6 @@ export function SignupForm() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState("")
   const router = useRouter()
-  const supabase = createClient()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -24,34 +25,33 @@ export function SignupForm() {
     setError("")
 
     try {
-      const { data, error: signUpError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            name,
-          }
-        }
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password)
+      const user = userCredential.user
+
+      // Update profile with name
+      await updateProfile(user, { displayName: name })
+
+      // Create user document in Firestore
+      await setDoc(doc(db, "users", user.uid), {
+        uid: user.uid,
+        email: user.email,
+        displayName: name,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
       })
-
-      if (signUpError) {
-        setError(signUpError.message)
-        return
-      }
-
-      // Create user in Prisma via API
-      if (data.user) {
-        await fetch("/api/auth/sync-user", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: data.user.id, email, name })
-        })
-      }
 
       router.push("/")
       router.refresh()
-    } catch (err) {
-      setError("Something went wrong. Please try again.")
+    } catch (err: any) {
+      if (err.code === 'auth/email-already-in-use') {
+        setError("An account with this email already exists.")
+      } else if (err.code === 'auth/weak-password') {
+        setError("Password is too weak. Please use at least 6 characters.")
+      } else if (err.code === 'auth/invalid-email') {
+        setError("Please enter a valid email address.")
+      } else {
+        setError("Failed to create account. Please try again.")
+      }
     } finally {
       setIsLoading(false)
     }
