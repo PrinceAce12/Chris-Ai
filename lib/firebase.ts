@@ -40,7 +40,8 @@ export const getAuthInstance = (): Auth => {
 
 export const getDbInstance = (): Firestore => {
   if (!dbInstance) {
-    dbInstance = getFirestore(getAppInstance(), firebaseConfig.firestoreDatabaseId);
+    const databaseId = getEnv('NEXT_PUBLIC_FIREBASE_FIRESTORE_DATABASE_ID', firebaseConfig.firestoreDatabaseId);
+    dbInstance = getFirestore(getAppInstance(), databaseId);
   }
   return dbInstance;
 };
