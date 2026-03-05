@@ -1,6 +1,6 @@
 {
-  "name": "Chris AI",
-  "description": "A production-ready clone of Grok's interface, branded as Chris AI.",
+  "name": "Chris",
+  "description": "A production-ready clone of Grok's interface, branded as Chris.",
   "requestFramePermissions": [
     "microphone"
   ]

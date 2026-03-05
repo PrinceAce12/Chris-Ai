@@ -5,9 +5,11 @@ import './globals.css'; // Global styles
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans' });
 
 export const metadata: Metadata = {
-  title: 'Chris AI',
+  title: 'Chris',
   description: 'Explore the Universe with Chris',
 };
+
+import { ThemeProvider } from '@/components/theme-provider';
 
 export default function RootLayout({
   children,
@@ -18,9 +20,16 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={`${inter.variable}`} suppressHydrationWarning>
-      <body className="bg-[#050505] text-white font-sans antialiased" suppressHydrationWarning>
-        {children}
-        {modal}
+      <body className="bg-white dark:bg-[#050505] text-black dark:text-white font-sans antialiased transition-colors duration-300" suppressHydrationWarning>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          {children}
+          {modal}
+        </ThemeProvider>
       </body>
     </html>
   );
