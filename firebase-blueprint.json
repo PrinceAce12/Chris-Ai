@@ -42,8 +42,7 @@
             "mimeType": { "type": "string" },
             "name": { "type": "string" }
           }
-        },
-        "videoUrl": { "type": "string", "format": "uri" }
+        }
       },
       "required": ["id", "role", "text", "createdAt"]
     }

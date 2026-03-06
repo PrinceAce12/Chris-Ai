@@ -12,7 +12,7 @@ service cloud.firestore {
     // Fields: id, userId, title, createdAt, updatedAt
     //
     // Collection: messages (subcollection of chats)
-    // Fields: id, role, text, createdAt, file, videoUrl
+    // Fields: id, role, text, createdAt, file
     //
     // ===============================================================
 

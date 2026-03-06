@@ -4,14 +4,22 @@ import { getFirestore, Firestore } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Helper to get env var or fallback, ensuring we don't use "undefined" or "null" strings
-const getEnv = (value: string | undefined, fallback: string) => {
-  if (!value || value === 'undefined' || value === 'null') return fallback;
-  return value;
+const getEnv = (key: string, value: string | undefined, fallback: string) => {
+  if (!value || value === 'undefined' || value === 'null' || value === 'TODO_KEYHERE' || value.length < 5) return fallback;
+  
+  // Clean up copy-paste errors like "authDomain: example.com" or '"example.com"'
+  let cleanedValue = value.replace(new RegExp(`^${key}:?\\s*`), '').replace(/^["']|["']$/g, '').trim();
+  
+  if (cleanedValue.length < 5) return fallback;
+
+  // If it's an API key, it should start with AIza
+  if (fallback.startsWith('AIza') && !cleanedValue.startsWith('AIza')) return fallback;
+  return cleanedValue;
 };
 
 const config: Record<string, string> = {};
 const addConfig = (key: string, value: string | undefined, fallback: string) => {
-  const val = getEnv(value, fallback);
+  const val = getEnv(key, value, fallback);
   if (val) config[key] = val;
 };
 
@@ -50,7 +58,7 @@ export const getAuthInstance = (): Auth => {
 
 export const getDbInstance = (): Firestore => {
   if (!dbInstance) {
-    const databaseId = getEnv(process.env.NEXT_PUBLIC_FIREBASE_FIRESTORE_DATABASE_ID, firebaseConfig.firestoreDatabaseId);
+    const databaseId = getEnv('firestoreDatabaseId', process.env.NEXT_PUBLIC_FIREBASE_FIRESTORE_DATABASE_ID, firebaseConfig.firestoreDatabaseId);
     dbInstance = getFirestore(getAppInstance(), databaseId);
   }
   return dbInstance;

@@ -19,7 +19,6 @@ import {
   FileText,
   Image as ImageIcon,
   Globe,
-  Settings,
   MessageSquare,
   Sun,
   Moon,
@@ -155,7 +154,6 @@ interface Message {
   isThinking?: boolean;
   groundingChunks?: any[];
   file?: FileAttachment;
-  videoUrl?: string;
   isError?: boolean;
 }
 
@@ -222,8 +220,6 @@ export default function Chris() {
   const router = useRouter();
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [status, setStatus] = useState<"loading" | "authenticated" | "unauthenticated">("loading");
-  const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
-  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
 
@@ -239,16 +235,6 @@ export default function Chris() {
       }
     };
     testConnection();
-
-    const checkApiKey = async () => {
-      if (typeof window !== 'undefined' && window.aistudio) {
-        const hasKey = await window.aistudio.hasSelectedApiKey();
-        setHasApiKey(hasKey);
-      } else {
-        setHasApiKey(true);
-      }
-    };
-    checkApiKey();
 
     // Network status listeners
     const handleOnline = () => setIsOnline(true);
@@ -310,6 +296,7 @@ export default function Chris() {
 
   const freeModels = [
     { id: 'auto', name: 'Auto' },
+    { id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite' },
     { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash' },
     { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
     { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro' },
@@ -375,7 +362,6 @@ export default function Chris() {
         role: doc.data().role,
         text: doc.data().text,
         file: doc.data().file,
-        videoUrl: doc.data().videoUrl,
         createdAt: doc.data().createdAt?.toDate() || new Date()
       }));
       setMessages(loadedMessages);
@@ -639,7 +625,7 @@ export default function Chris() {
     setIsGenerating(true);
     try {
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3.1-flash-lite-preview',
         contents: `Improve this prompt to be highly detailed and effective for an AI model. Only return the improved prompt, nothing else. Original prompt: "${input}"`
       });
       if (response.text) {
@@ -745,11 +731,24 @@ export default function Chris() {
         config.thinkingConfig = { thinkingLevel: ThinkingLevel.HIGH };
       }
 
-      const cacheKey = JSON.stringify({ contents, config, isImagineMode, isThinkMode, isMapsMode });
+      let currentModelName = selectedModel;
+      if (currentModelName === 'auto') {
+        currentModelName = 'gemini-3.1-flash-lite-preview';
+      }
+      
+      if (isThinkMode) {
+        currentModelName = 'gemini-3.1-pro-preview';
+      } else if (isMapsMode) {
+        currentModelName = 'gemini-2.5-flash';
+      }
+      
+      if (status === "unauthenticated") {
+        currentModelName = 'gemini-3.1-flash-lite-preview';
+      }
+
+      const cacheKey = JSON.stringify({ contents, config, isImagineMode, isThinkMode, isMapsMode, currentModelName });
       let response;
       let isImageResponse = isImagineMode;
-      let isVideoResponse = false;
-      let videoUrl = '';
 
       if (aiResponseCache.has(cacheKey)) {
         response = aiResponseCache.get(cacheKey);
@@ -776,21 +775,6 @@ export default function Chris() {
             contents: { parts: imagineParts }
           });
         } else {
-          let currentModelName = selectedModel;
-          if (currentModelName === 'auto') {
-            currentModelName = 'gemini-3-flash-preview';
-          }
-          
-          if (isThinkMode) {
-            currentModelName = 'gemini-3.1-pro-preview';
-          } else if (isMapsMode) {
-            currentModelName = 'gemini-2.5-flash';
-          }
-          
-          if (status === "unauthenticated") {
-            currentModelName = 'gemini-3-flash-preview';
-          }
-          
           const generateImageFunctionDeclaration: FunctionDeclaration = {
             name: "generateImage",
             description: "Generate an image based on a text prompt. Use this tool when the user asks to create, generate, or draw an image or picture.",
@@ -806,30 +790,11 @@ export default function Chris() {
             },
           };
 
-          const generateVideoFunctionDeclaration: FunctionDeclaration = {
-            name: "generateVideo",
-            description: "Generate a video based on a text prompt and an optional uploaded image. Use this tool when the user asks to animate an image, create a video, or generate a video.",
-            parameters: {
-              type: Type.OBJECT,
-              properties: {
-                prompt: {
-                  type: Type.STRING,
-                  description: "A detailed description of the video to generate.",
-                },
-                aspectRatio: {
-                  type: Type.STRING,
-                  description: "The aspect ratio of the video. Must be '16:9' or '9:16'. Default to '16:9' if not specified.",
-                }
-              },
-              required: ["prompt"],
-            },
-          };
-
           const currentConfig = { ...config };
           // Only add the tool if we are not using maps mode, as maps mode restricts other tools
           if (!isMapsMode && status === "authenticated") {
             currentConfig.tools = currentConfig.tools || [];
-            currentConfig.tools.push({ functionDeclarations: [generateImageFunctionDeclaration, generateVideoFunctionDeclaration] });
+            currentConfig.tools.push({ functionDeclarations: [generateImageFunctionDeclaration] });
           }
           
           if (currentConfig.tools && currentConfig.tools.length === 0) {
@@ -858,71 +823,6 @@ export default function Chris() {
               
               response = imageResponse;
               isImageResponse = true;
-            } else if (call.name === 'generateVideo') {
-              const prompt = call.args?.prompt as string;
-              const aspectRatio = (call.args?.aspectRatio as string) || '16:9';
-              
-              // Now generate the video
-              const videoConfig: any = {
-                numberOfVideos: 1,
-                resolution: '720p',
-                aspectRatio: aspectRatio === '9:16' ? '9:16' : '16:9'
-              };
-              
-              const videoParams: any = {
-                model: 'veo-3.1-fast-generate-preview',
-                prompt: prompt,
-                config: videoConfig
-              };
-              
-              if (currentFile && currentFile.mimeType.startsWith('image/')) {
-                videoParams.image = {
-                  imageBytes: currentFile.base64,
-                  mimeType: currentFile.mimeType
-                };
-              }
-              
-              // Create a new GoogleGenAI instance to ensure it uses the most up-to-date API key from the dialog
-              const videoAi = getGenAI();
-              if (videoAi) {
-                try {
-                  let operation = await videoAi.models.generateVideos(videoParams);
-                  
-                  while (!operation.done) {
-                    await new Promise(resolve => setTimeout(resolve, 10000));
-                    operation = await videoAi.operations.getVideosOperation({operation: operation});
-                  }
-                  
-                  const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
-                  
-                  if (downloadLink) {
-                    const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.API_KEY || '';
-                    const videoResponse = await fetch(downloadLink, {
-                      method: 'GET',
-                      headers: {
-                        'x-goog-api-key': apiKey,
-                      },
-                    });
-                    const blob = await videoResponse.blob();
-                    videoUrl = URL.createObjectURL(blob);
-                    isVideoResponse = true;
-                    
-                    // Mock a response object for the chat UI
-                    response = {
-                      text: 'Here is your generated video:',
-                      candidates: [{ content: { parts: [{ text: 'Here is your generated video:' }] } }]
-                    } as any;
-                  }
-                } catch (videoError: any) {
-                  const msg = videoError?.message || videoError?.toString() || '';
-                  if (msg.toLowerCase().includes('not found') || msg.toLowerCase().includes('403') || msg.toLowerCase().includes('requested entity was not found')) {
-                    setShowApiKeyModal(true);
-                    throw new Error('VEO_API_KEY_REQUIRED');
-                  } else {
-                    throw videoError;
-                  }
-                }
-              }
             }
           }
 
@@ -967,14 +867,7 @@ export default function Chris() {
 
       let aiMessage: Message;
 
-      if (isVideoResponse && videoUrl) {
-        aiMessage = {
-          id: (Date.now() + 1).toString(),
-          role: 'ai',
-          text: 'Here is your generated video:',
-          videoUrl: videoUrl,
-        };
-      } else if (isImageResponse) {
+      if (isImageResponse) {
         let imageUrl = '';
         if (candidate?.content?.parts) {
           for (const part of candidate.content.parts) {
@@ -1046,7 +939,6 @@ export default function Chris() {
             id: aiMsgRef.id,
             role: "ai",
             text: response.text || "",
-            videoUrl: videoUrl || null,
             createdAt: serverTimestamp()
           });
         } catch (dbError) {
@@ -1056,8 +948,9 @@ export default function Chris() {
 
     } catch (error: any) {
       const msg = error?.message || error?.toString() || '';
-      if (msg.includes('VEO_API_KEY_REQUIRED')) {
-        // Do nothing, the modal is shown and we don't want to add an error message to the chat
+      if (msg.toLowerCase().includes('429') || msg.toLowerCase().includes('quota')) {
+        addToast('The AI is currently experiencing high traffic. Please try again in a few seconds.', 'error');
+        setMessages((prev) => [...prev, { id: Date.now().toString(), role: 'ai', text: 'I am currently receiving too many requests. Please wait a moment and try again.', isError: true }]);
       } else {
         handleError(error);
         setMessages((prev) => [...prev, { id: Date.now().toString(), role: 'ai', text: 'Failed to generate response.', isError: true }]);
@@ -1212,11 +1105,6 @@ export default function Chris() {
           </div>
           <div className="flex items-center gap-3 md:gap-4">
             <ThemeToggle />
-            {status === "authenticated" && (
-              <button className="p-2 text-black/70 dark:text-white/70 hover:bg-black/5 dark:hover:bg-white/10 rounded-full transition-colors" title="Settings">
-                <Settings className="w-5 h-5" strokeWidth={1.5} />
-              </button>
-            )}
             {status === "authenticated" ? (
               <div className="flex items-center gap-3">
                 <div className="hidden md:flex flex-col items-end">
@@ -1682,49 +1570,6 @@ export default function Chris() {
         </div>
       )}
 
-      {/* API Key Modal */}
-      {showApiKeyModal && (
-        <div 
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4"
-          onClick={() => setShowApiKeyModal(false)}
-        >
-          <div 
-            className="bg-white dark:bg-[#111111] border border-black/10 dark:border-white/10 rounded-2xl p-6 md:p-8 max-w-md w-full flex flex-col items-center text-center shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <PlanetLogo className="w-12 h-12 mb-6 text-black dark:text-white" />
-            <h2 className="text-2xl font-bold mb-3 text-black dark:text-white">API Key Required</h2>
-            <p className="text-black/70 dark:text-white/70 mb-6 leading-relaxed">
-              To use Veo video generation features, you need to select a paid Google Cloud API key. The current key does not have access to this model.
-              <br /><br />
-              <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 underline underline-offset-2 transition-colors">
-                Learn more about billing
-              </a>
-            </p>
-            <div className="flex gap-3 w-full">
-              <button
-                onClick={() => setShowApiKeyModal(false)}
-                className="flex-1 px-4 py-2.5 bg-black/5 dark:bg-white/10 text-black dark:text-white font-medium rounded-xl hover:bg-black/10 dark:hover:bg-white/20 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={async () => {
-                  if (window.aistudio) {
-                    await window.aistudio.openSelectKey();
-                    setHasApiKey(true);
-                    setShowApiKeyModal(false);
-                  }
-                }}
-                className="flex-1 px-4 py-2.5 bg-black text-white dark:bg-white dark:text-black font-semibold rounded-xl hover:opacity-90 transition-colors"
-              >
-                Select Key
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Main Content */}
       <div className="flex-1 flex flex-col relative min-w-0 bg-white dark:bg-[#000000]">
         {/* Chat Feed */}
@@ -1817,25 +1662,6 @@ export default function Chris() {
                           <div className="text-xs truncate max-w-[150px] opacity-80">{msg.file.name}</div>
                         </div>
                       )
-                    )}
-                    
-                    {msg.videoUrl && (
-                      <div className="mb-3 relative group w-fit">
-                        <video 
-                          src={msg.videoUrl} 
-                          controls 
-                          className="max-w-full rounded-2xl border border-black/10 dark:border-white/10 shadow-sm"
-                          style={{ maxHeight: '60vh' }}
-                        />
-                        <a 
-                          href={msg.videoUrl} 
-                          download="generated-video.mp4"
-                          className="absolute top-2 right-2 p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-lg opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity backdrop-blur-md flex items-center justify-center"
-                          title="Download Video"
-                        >
-                          <Download className="w-3.5 h-3.5" strokeWidth={2} />
-                        </a>
-                      </div>
                     )}
                     
                     {msg.role === 'ai' && msg.isThinking && (
