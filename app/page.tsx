@@ -45,13 +45,15 @@ import {
   Info,
   TriangleAlert,
   Rocket,
-  Zap,
-  Locate
+  Zap
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+
+import { CodeBlock } from './components/CodeBlock';
+import { TypewriterMessage } from './components/TypewriterMessage';
 
 import { auth, db } from '@/lib/firebase';
 import { 
@@ -155,6 +157,7 @@ interface Message {
   file?: FileAttachment;
   isError?: boolean;
   mapLocation?: { lat: number; lng: number };
+  shouldAnimate?: boolean;
 }
 
 interface Toast {
@@ -167,51 +170,6 @@ import { PlanetLogo } from '@/components/PlanetLogo';
 import { ThemeToggle } from '@/components/theme-toggle';
 
 // --- Components ---
-const CodeBlock = ({ className, children, node, ref, ...rest }: any) => {
-  const [copied, setCopied] = useState(false);
-  const match = /language-(\w+)/.exec(className || '');
-  
-  const handleCopy = () => {
-    navigator.clipboard.writeText(String(children).replace(/\n$/, ''));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  if (match) {
-    const language = match[1];
-    return (
-      <div className="relative my-6 rounded-xl overflow-hidden border border-black/10 dark:border-white/10 bg-[#0d0d0d]">
-        <div className="flex items-center justify-between px-4 py-2 bg-white/5 border-b border-white/5">
-          <span className="text-xs font-mono text-white/50">{language}</span>
-          <button
-            onClick={handleCopy}
-            className="flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-white/10 text-white/50 hover:text-white text-xs font-medium transition-colors cursor-pointer"
-          >
-            {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
-            {copied ? <span className="text-green-400">Copied</span> : 'Copy'}
-          </button>
-        </div>
-        <SyntaxHighlighter
-          {...rest}
-          PreTag="div"
-          language={language}
-          style={vscDarkPlus}
-          customStyle={{ margin: 0, padding: '1rem', background: 'transparent' }}
-          className="text-[13px] sm:text-sm"
-        >
-          {String(children).replace(/\n$/, '')}
-        </SyntaxHighlighter>
-      </div>
-    );
-  }
-
-  return (
-    <code {...rest} className={`${className || ''} bg-black/5 dark:bg-white/10 text-black/90 dark:text-white/90 rounded-md px-1.5 py-0.5 font-mono text-[13px]`}>
-      {children}
-    </code>
-  );
-};
-
 // --- Simple Memory Cache for AI Responses ---
 const aiResponseCache = new Map<string, any>();
 
@@ -270,8 +228,12 @@ export default function Chris() {
   
   // Fetch location when Maps Mode is enabled
   useEffect(() => {
-    if (isMapsMode && !userLocation) {
+    let watchId: number | null = null;
+    let timeoutId: NodeJS.Timeout | null = null;
+
+    if (isMapsMode) {
       if (navigator.geolocation) {
+        // 1. Get initial position
         navigator.geolocation.getCurrentPosition(
           (position) => {
             setUserLocation({
@@ -284,11 +246,33 @@ export default function Chris() {
             addToast("Could not access location for Maps mode.", "warning");
           }
         );
+
+        // 2. Start tracking after a delay
+        timeoutId = setTimeout(() => {
+          watchId = navigator.geolocation.watchPosition(
+            (position) => {
+              setUserLocation({
+                latitude: position.coords.latitude,
+                longitude: position.coords.longitude,
+              });
+            },
+            (error) => console.error("Error tracking:", error),
+            { enableHighAccuracy: true }
+          );
+        }, 5000); // 5 seconds delay
       } else {
         addToast("Geolocation is not supported by this browser.", "warning");
       }
+    } else {
+      // Clear location when Maps Mode is disabled
+      setUserLocation(null);
     }
-  }, [isMapsMode, userLocation]);
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      if (watchId) navigator.geolocation.clearWatch(watchId);
+    };
+  }, [isMapsMode]);
 
   const [selectedModel, setSelectedModel] = useState('auto');
   const [attachedFile, setAttachedFile] = useState<FileAttachment | null>(null);
@@ -313,8 +297,7 @@ export default function Chris() {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [chatHistory, setChatHistory] = useState<any[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-  const [showLocationConfirmation, setShowLocationConfirmation] = useState(false);
-  const [pendingLocationRequest, setPendingLocationRequest] = useState(false);
+
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -661,21 +644,9 @@ export default function Chris() {
     setIsGenerating(false);
   };
 
-  const handleSubmit = async (e?: React.FormEvent, locationOverride?: { latitude: number; longitude: number }) => {
+  const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if ((!input.trim() && !attachedFile && !locationOverride) || isGenerating) return;
-
-    if (!locationOverride && status === "authenticated") {
-      const lowerInput = input.toLowerCase();
-      const locationKeywords = ['where am i', 'track my location', 'share my location'];
-      const isLocationRequest = locationKeywords.some(kw => lowerInput.includes(kw));
-
-      if (isLocationRequest && !attachedFile) {
-        setPendingLocationRequest(true);
-        setShowLocationConfirmation(true);
-        return;
-      }
-    }
+    if ((!input.trim() && !attachedFile) || isGenerating) return;
 
     if (status === "unauthenticated") {
       if (attachedFile || isImagineMode || isMapsMode || isDeepSearchMode || isThinkMode) {
@@ -688,9 +659,6 @@ export default function Chris() {
     if (!ai) return;
 
     let userText = input.trim();
-    if (locationOverride) {
-      userText = userText ? `${userText}\n[System: User Location: ${locationOverride.latitude}, ${locationOverride.longitude}]` : `[System: User Location: ${locationOverride.latitude}, ${locationOverride.longitude}]`;
-    }
     const currentFile = attachedFile;
 
     setInput('');
@@ -950,7 +918,7 @@ export default function Chris() {
           text: response.text || '',
           isThinking: isThinkMode,
           groundingChunks: candidate?.groundingMetadata?.groundingChunks,
-          mapLocation: locationOverride ? { lat: locationOverride.latitude, lng: locationOverride.longitude } : undefined
+          shouldAnimate: true
         };
       }
 
@@ -1098,41 +1066,7 @@ export default function Chris() {
     }
   };
 
-  const handleLocationShare = () => {
-    setPendingLocationRequest(false);
-    setShowLocationConfirmation(true);
-  };
 
-  const confirmLocationShare = () => {
-    setShowLocationConfirmation(false);
-    
-    if (!navigator.geolocation) {
-      addToast('Geolocation is not supported by your browser', 'error');
-      return;
-    }
-
-    addToast('Getting location...', 'info');
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude } = position.coords;
-        
-        if (pendingLocationRequest) {
-          // Automatic submission with location
-          handleSubmit(undefined, { latitude, longitude });
-        } else {
-          // Manual append to input
-          const locationText = `My current location is: Latitude ${latitude}, Longitude ${longitude}`;
-          setInput((prev) => (prev ? `${prev}\n${locationText}` : locationText));
-          addToast('Location added to input', 'success');
-        }
-      },
-      (error) => {
-        console.error('Error getting location:', error);
-        addToast('Unable to retrieve your location', 'error');
-      }
-    );
-  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -1276,13 +1210,7 @@ export default function Chris() {
                 >
                   <Paperclip className="w-5 h-5" strokeWidth={1.5} />
                 </button>
-                {/* <button 
-                  onClick={handleLocationShare}
-                  className="p-2 text-black/40 dark:text-white/40 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-colors shrink-0"
-                  title="Share Location"
-                >
-                  <Locate className="w-5 h-5" strokeWidth={1.5} />
-                </button> */}
+
 
                 <textarea
                   ref={textareaRef as any}
@@ -1434,38 +1362,7 @@ export default function Chris() {
     <div className="flex h-[100dvh] w-full bg-white dark:bg-[#050505] text-black dark:text-white font-sans overflow-hidden selection:bg-black/20 dark:selection:bg-white/20">
       {renderToasts()}
 
-      {/* Location Confirmation Modal */}
-      {showLocationConfirmation && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-[#1a1a1a] rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-black/10 dark:border-white/10 animate-in zoom-in-95 duration-200">
-            <div className="flex flex-col items-center text-center gap-4">
-              <div className="w-12 h-12 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-600 dark:text-blue-400">
-                <Locate className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="text-lg font-bold text-black dark:text-white mb-1">Share Location?</h3>
-                <p className="text-sm text-black/60 dark:text-white/60">
-                  Chris needs permission to access your current location to provide relevant information.
-                </p>
-              </div>
-              <div className="flex gap-3 w-full mt-2">
-                <button
-                  onClick={() => setShowLocationConfirmation(false)}
-                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium text-black/70 dark:text-white/70 hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={confirmLocationShare}
-                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors shadow-lg shadow-blue-500/20"
-                >
-                  Allow Access
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+
 
       {/* Mobile Sidebar Overlay */}
       {isSidebarOpen && (
@@ -1731,13 +1628,19 @@ export default function Chris() {
               )}
             </div>
             <div className="flex items-center gap-2">
-              <ThemeToggle />
               {status === "authenticated" ? (
                 <>
-                  <button className="p-1.5 text-black/70 dark:text-white/70 hover:bg-black/5 dark:hover:bg-white/10 rounded-full transition-colors">
-                    <MoreHorizontal className="w-4 h-4" strokeWidth={1.5} />
-                  </button>
-                  <button className="flex items-center gap-1.5 px-3 py-1.5 bg-black dark:bg-white text-white dark:text-black rounded-full text-[13px] font-medium hover:opacity-90 transition-opacity">
+                  <button 
+                    onClick={() => {
+                      const url = window.location.href;
+                      navigator.clipboard.writeText(url).then(() => {
+                        addToast('Link copied to clipboard', 'success');
+                      }).catch(() => {
+                        addToast('Failed to copy link', 'error');
+                      });
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-black dark:bg-white text-white dark:text-black rounded-full text-[13px] font-medium hover:opacity-90 transition-opacity"
+                  >
                     <Share className="w-3.5 h-3.5" strokeWidth={2} />
                     Share
                   </button>
@@ -1809,28 +1712,37 @@ export default function Chris() {
                       </div>
                     )}
 
-                    <div className="prose prose-invert max-w-none prose-p:leading-relaxed prose-pre:p-0 prose-pre:bg-transparent prose-pre:border-0 text-[14px] sm:text-[15px] tracking-wide">
-                      <Markdown
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                          code: CodeBlock,
-                          p: ({ children }) => <p className="mb-4 last:mb-0">{children}</p>,
-                          ul: ({ children }) => <ul className="list-disc pl-6 mb-4 space-y-2">{children}</ul>,
-                          ol: ({ children }) => <ol className="list-decimal pl-6 mb-4 space-y-2">{children}</ol>,
-                          li: ({ children }) => <li className="pl-1">{children}</li>,
-                          h1: ({ children }) => <h1 className="text-2xl font-bold mb-4 mt-6 text-black dark:text-white">{children}</h1>,
-                          h2: ({ children }) => <h2 className="text-xl font-bold mb-4 mt-6 text-black dark:text-white">{children}</h2>,
-                          h3: ({ children }) => <h3 className="text-lg font-bold mb-3 mt-5 text-black dark:text-white">{children}</h3>,
-                          blockquote: ({ children }) => <blockquote className="border-l-4 border-black/20 dark:border-white/20 pl-4 italic text-black/70 dark:text-white/70 my-4">{children}</blockquote>,
-                          a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 underline underline-offset-2 decoration-blue-400/30 hover:decoration-blue-400 transition-colors">{children}</a>,
-                          table: ({ children }) => <div className="overflow-x-auto my-6"><table className="w-full text-left border-collapse">{children}</table></div>,
-                          th: ({ children }) => <th className="border-b border-black/10 dark:border-white/10 px-4 py-3 font-medium text-black/90 dark:text-white/90 bg-black/5 dark:bg-white/5">{children}</th>,
-                          td: ({ children }) => <td className="border-b border-black/5 dark:border-white/5 px-4 py-3 text-black/70 dark:text-white/70">{children}</td>,
+                    {msg.role === 'ai' && msg.shouldAnimate ? (
+                      <TypewriterMessage 
+                        text={msg.text} 
+                        onComplete={() => {
+                          setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, shouldAnimate: false } : m));
                         }}
-                      >
-                        {msg.text}
-                      </Markdown>
-                    </div>
+                      />
+                    ) : (
+                      <div className="prose prose-invert max-w-none prose-p:leading-relaxed prose-pre:p-0 prose-pre:bg-transparent prose-pre:border-0 text-[14px] sm:text-[15px] tracking-wide">
+                        <Markdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            code: CodeBlock,
+                            p: ({ children }) => <p className="mb-4 last:mb-0">{children}</p>,
+                            ul: ({ children }) => <ul className="list-disc pl-6 mb-4 space-y-2">{children}</ul>,
+                            ol: ({ children }) => <ol className="list-decimal pl-6 mb-4 space-y-2">{children}</ol>,
+                            li: ({ children }) => <li className="pl-1">{children}</li>,
+                            h1: ({ children }) => <h1 className="text-2xl font-bold mb-4 mt-6 text-black dark:text-white">{children}</h1>,
+                            h2: ({ children }) => <h2 className="text-xl font-bold mb-4 mt-6 text-black dark:text-white">{children}</h2>,
+                            h3: ({ children }) => <h3 className="text-lg font-bold mb-3 mt-5 text-black dark:text-white">{children}</h3>,
+                            blockquote: ({ children }) => <blockquote className="border-l-4 border-black/20 dark:border-white/20 pl-4 italic text-black/70 dark:text-white/70 my-4">{children}</blockquote>,
+                            a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 underline underline-offset-2 decoration-blue-400/30 hover:decoration-blue-400 transition-colors">{children}</a>,
+                            table: ({ children }) => <div className="overflow-x-auto my-6"><table className="w-full text-left border-collapse">{children}</table></div>,
+                            th: ({ children }) => <th className="border-b border-black/10 dark:border-white/10 px-4 py-3 font-medium text-black/90 dark:text-white/90 bg-black/5 dark:bg-white/5">{children}</th>,
+                            td: ({ children }) => <td className="border-b border-black/5 dark:border-white/5 px-4 py-3 text-black/70 dark:text-white/70">{children}</td>,
+                          }}
+                        >
+                          {msg.text}
+                        </Markdown>
+                      </div>
+                    )}
 
                     {msg.mapLocation && (
                       <div className="mt-4 pt-4 border-t border-black/10 dark:border-white/10">
@@ -2037,13 +1949,6 @@ export default function Chris() {
                 >
                   <Paperclip className="w-4 h-4" strokeWidth={1.5} />
                 </button>
-                <button 
-                  onClick={handleLocationShare}
-                  className="p-1.5 mb-0.5 text-black/40 dark:text-white/40 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-colors shrink-0"
-                  title="Share Location"
-                >
-                  <Locate className="w-4 h-4" strokeWidth={1.5} />
-                </button>
 
                 <textarea
                   ref={textareaRef as any}
@@ -2157,13 +2062,15 @@ export default function Chris() {
                     </button>
                   </>
                 )}
-                <button 
-                  onClick={() => setIsMapsMode(!isMapsMode)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all duration-300 text-[12px] font-medium border cursor-pointer ${isMapsMode ? 'bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400' : 'bg-transparent border-black/10 dark:border-white/10 text-black/60 dark:text-white/60 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5'}`}
-                >
-                  <MapPin className="w-3.5 h-3.5" strokeWidth={1.5} />
-                  <span>Maps</span>
-                </button>
+                {user?.email === 'johnkerveelayese@gmail.com' && (
+                  <button 
+                    onClick={() => setIsMapsMode(!isMapsMode)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all duration-300 text-[12px] font-medium border cursor-pointer ${isMapsMode ? 'bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400' : 'bg-transparent border-black/10 dark:border-white/10 text-black/60 dark:text-white/60 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5'}`}
+                  >
+                    <MapPin className="w-3.5 h-3.5" strokeWidth={1.5} />
+                    <span>Maps</span>
+                  </button>
+                )}
                 {user?.email === 'johnkerveelayese@gmail.com' && (
                   <button 
                     onClick={() => setIsImagineMode(!isImagineMode)}

@@ -4,8 +4,9 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { auth } from '@/lib/firebase';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
-import { ArrowLeft, LogOut, User as UserIcon, Mail, Shield } from 'lucide-react';
+import { ArrowLeft, LogOut, User as UserIcon, Mail, Shield, Moon } from 'lucide-react';
 import Link from 'next/link';
+import { ThemeToggle } from '@/components/theme-toggle';
 
 export default function ProfilePage() {
   const [user, setUser] = useState<User | null>(null);
@@ -109,6 +110,17 @@ export default function ProfilePage() {
                   {user.emailVerified && <span className="text-xs bg-green-500/10 text-green-600 px-2 py-0.5 rounded-full ml-2">Verified</span>}
                 </div>
               </div>
+            </div>
+
+            <div className="p-4 bg-white dark:bg-black/20 rounded-2xl border border-black/5 dark:border-white/5 flex items-center gap-4">
+              <div className="p-2 bg-yellow-500/10 text-yellow-500 rounded-xl">
+                <Moon className="w-5 h-5" />
+              </div>
+              <div className="flex-1">
+                <div className="text-xs text-black/40 dark:text-white/40 font-medium uppercase tracking-wider">Theme</div>
+                <div className="font-medium">Switch Theme</div>
+              </div>
+              <ThemeToggle />
             </div>
           </div>
 
