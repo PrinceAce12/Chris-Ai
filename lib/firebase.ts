@@ -9,15 +9,26 @@ const getEnv = (value: string | undefined, fallback: string) => {
   return value;
 };
 
-const config = {
-  apiKey: getEnv(process.env.NEXT_PUBLIC_FIREBASE_API_KEY, firebaseConfig.apiKey),
-  authDomain: getEnv(process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN, firebaseConfig.authDomain),
-  projectId: getEnv(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID, firebaseConfig.projectId),
-  storageBucket: getEnv(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET, firebaseConfig.storageBucket),
-  messagingSenderId: getEnv(process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID, firebaseConfig.messagingSenderId),
-  appId: getEnv(process.env.NEXT_PUBLIC_FIREBASE_APP_ID, firebaseConfig.appId),
-  measurementId: getEnv(process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID, firebaseConfig.measurementId),
+const config: Record<string, string> = {};
+const addConfig = (key: string, value: string | undefined, fallback: string) => {
+  const val = getEnv(value, fallback);
+  if (val) config[key] = val;
 };
+
+addConfig('apiKey', process.env.NEXT_PUBLIC_FIREBASE_API_KEY, firebaseConfig.apiKey);
+addConfig('authDomain', process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN, firebaseConfig.authDomain);
+addConfig('projectId', process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID, firebaseConfig.projectId);
+addConfig('storageBucket', process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET, firebaseConfig.storageBucket);
+addConfig('messagingSenderId', process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID, firebaseConfig.messagingSenderId);
+addConfig('appId', process.env.NEXT_PUBLIC_FIREBASE_APP_ID, firebaseConfig.appId);
+addConfig('measurementId', process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID, firebaseConfig.measurementId);
+
+if (typeof window !== 'undefined') {
+  console.log('[Firebase Config Check] Project ID:', config.projectId);
+  if (!config.apiKey || config.apiKey.length < 10) {
+    console.error('[Firebase Config Check] API Key is missing or too short!');
+  }
+}
 
 let app: FirebaseApp;
 let authInstance: Auth;
