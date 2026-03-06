@@ -192,12 +192,6 @@ export default function Chris() {
   const [isOnline, setIsOnline] = useState(true);
 
   useEffect(() => {
-    if (status === "unauthenticated") {
-      router.push('/landing');
-    }
-  }, [status, router]);
-
-  useEffect(() => {
     // Test Firestore connection
     const testConnection = async () => {
       try {
@@ -732,7 +726,9 @@ export default function Chris() {
 
       const contents = [...historyContents, { role: 'user', parts: currentParts }];
 
-      const config: any = {};
+      const config: any = {
+        systemInstruction: "You are Chris AI, a helpful assistant. You have tools to track location, search the web, and generate images. When a user asks to track their location or find where they are, use the 'trackLocation' tool. If Maps mode is already enabled, you can use Google Maps to find places nearby."
+      };
       config.tools = config.tools || [];
       config.tools.push({ functionDeclarations: [trackLocationFunctionDeclaration] });
 
@@ -921,6 +917,11 @@ export default function Chris() {
 
       let aiMessage: Message;
 
+      let aiText = response.text || '';
+      if (!aiText && response.functionCalls?.some((c: any) => c.name === 'trackLocation')) {
+        aiText = "I've enabled location tracking for you. How can I help with your location?";
+      }
+
       if (isImageResponse) {
         let imageUrl = '';
         if (candidate?.content?.parts) {
@@ -942,7 +943,7 @@ export default function Chris() {
         aiMessage = {
           id: (Date.now() + 1).toString(),
           role: 'ai',
-          text: response.text || '',
+          text: aiText,
           isThinking: isThinkMode,
           groundingChunks: candidate?.groundingMetadata?.groundingChunks,
           shouldAnimate: true
@@ -1152,240 +1153,7 @@ export default function Chris() {
     );
   }
 
-  if (messages.length === 0) {
-    return (
-      <div className="flex flex-col h-[100dvh] w-full bg-white dark:bg-[#000000] text-black dark:text-white font-sans overflow-hidden relative selection:bg-black/20 dark:selection:bg-white/20">
-        {renderToasts()}
-        
-        {/* Top Nav */}
-        <header className="relative z-20 flex items-center justify-between p-4 md:p-6">
-          <div className="flex items-center gap-2">
-            <PlanetLogo className="w-8 h-8 text-black dark:text-white" />
-          </div>
-          <div className="flex items-center gap-3 md:gap-4">
-            <ThemeToggle />
-            {status === "authenticated" ? (
-              <div className="flex items-center gap-3">
-                <div className="hidden md:flex flex-col items-end">
-                  <span className="text-sm font-bold">{user?.displayName}</span>
-                  <span className="text-[10px] text-black/40 dark:text-white/40">{user?.email}</span>
-                </div>
-                <Link 
-                  href="/profile"
-                  className="p-2 text-black/40 dark:text-white/40 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-colors"
-                  title="Profile"
-                >
-                  <UserIcon className="w-5 h-5" strokeWidth={1.5} />
-                </Link>
-              </div>
-            ) : (
-              <>
-                <Link href="/login" className="hidden md:block px-5 py-2 text-sm font-medium hover:bg-black/5 dark:hover:bg-white/10 rounded-full transition-colors border border-transparent hover:border-black/10 dark:hover:border-white/10">
-                  Sign in
-                </Link>
-                <Link href="/signup" className="px-5 py-2 text-sm font-medium bg-black text-white dark:bg-white dark:text-black rounded-full hover:opacity-90 transition-opacity">
-                  Sign up
-                </Link>
-              </>
-            )}
-          </div>
-        </header>
-
-        {/* Main Center Content */}
-        <main className="flex-1 flex flex-col items-center justify-center relative z-10 px-4 -mt-20 w-full max-w-4xl mx-auto">
-          <div className="flex items-center gap-4 mb-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
-            <PlanetLogo className="w-12 h-12 md:w-16 md:h-16 text-black dark:text-white" />
-            <span className="text-5xl md:text-6xl font-semibold tracking-tight">Chris</span>
-          </div>
-
-          {/* Input Bar */}
-          <div className="w-full max-w-[680px] relative animate-in fade-in slide-in-from-bottom-5 duration-700 delay-100 z-30">
-            <div className={`w-full relative bg-gray-50 dark:bg-[#121212] border border-black/10 dark:border-white/10 rounded-[32px] px-4 py-3 shadow-lg transition-all focus-within:border-black/20 dark:focus-within:border-white/20 focus-within:bg-white dark:focus-within:bg-[#121212] flex flex-col gap-2 group ${attachedFile ? 'rounded-[24px]' : ''}`}>
-              
-              {/* Attached File Preview */}
-              {attachedFile && (
-                <div className="mb-1 flex items-center gap-3 px-1">
-                  <div className="relative group/file">
-                    {attachedFile.mimeType.startsWith('image/') ? (
-                      <img src={`data:${attachedFile.mimeType};base64,${attachedFile.base64}`} alt="preview" className="w-12 h-12 md:w-14 md:h-14 object-cover rounded-xl border border-black/10 dark:border-white/10" />
-                    ) : (
-                      <div className="w-12 h-12 md:w-14 md:h-14 flex items-center justify-center bg-black/5 dark:bg-white/5 rounded-xl border border-black/10 dark:border-white/10">
-                        <FileText className="w-5 h-5 md:w-6 md:h-6 text-black/50 dark:text-white/50" strokeWidth={1.5} />
-                      </div>
-                    )}
-                    <button
-                      onClick={removeFile}
-                      className="absolute -top-2 -right-2 w-6 h-6 bg-white dark:bg-[#222] border border-black/20 dark:border-white/20 rounded-full flex items-center justify-center md:opacity-0 md:group-hover/file:opacity-100 transition-opacity cursor-pointer"
-                    >
-                      <X className="w-3 h-3" strokeWidth={2} />
-                    </button>
-                  </div>
-                  <div className="text-xs text-black/50 dark:text-white/50 truncate max-w-[150px] md:max-w-[200px]">{attachedFile.name}</div>
-                </div>
-              )}
-
-              <div className="flex items-center gap-3 w-full">
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleFileChange}
-                  className="hidden"
-                  accept="image/*,.pdf,.txt"
-                />
-                <button 
-                  onClick={() => fileInputRef.current?.click()}
-                  className="p-2 text-black/40 dark:text-white/40 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-colors shrink-0"
-                  title="Attach File"
-                >
-                  <Paperclip className="w-5 h-5" strokeWidth={1.5} />
-                </button>
-
-
-                <textarea
-                  ref={textareaRef as any}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="What's on your mind?"
-                  className="flex-1 bg-transparent resize-none outline-none text-[16px] placeholder:text-black/30 dark:placeholder:text-white/30 min-h-[24px] max-h-[200px] text-black dark:text-white no-scrollbar py-1"
-                  rows={1}
-                />
-                
-                <div className="flex items-center gap-2 shrink-0">
-                  {/* Model Selector */}
-                  {false && status === "authenticated" && (
-                    <div className="relative hidden sm:block" ref={modelDropdownRef}>
-                      <button
-                        onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white dark:bg-[#1a1a1a] hover:bg-gray-100 dark:hover:bg-[#222] border border-black/5 dark:border-white/5 hover:border-black/10 dark:hover:border-white/10 transition-all cursor-pointer text-xs font-medium text-black/80 dark:text-white/80 hover:text-black dark:hover:text-white group"
-                      >
-                        <span className="text-blue-500 dark:text-blue-400 group-hover:text-blue-600 dark:group-hover:text-blue-300 transition-colors">
-                          <Rocket className="w-3.5 h-3.5" strokeWidth={2} />
-                        </span>
-                        <span>
-                          {freeModels.find(m => m.id === selectedModel)?.name || 'Auto'}
-                        </span>
-                        <ChevronDown className={`w-3 h-3 text-black/40 dark:text-white/40 transition-transform duration-200 ${isModelDropdownOpen ? 'rotate-180' : ''}`} />
-                      </button>
-
-                      {/* Dropdown Menu */}
-                      {isModelDropdownOpen && (
-                        <div className="absolute bottom-full right-0 mb-2 w-48 bg-white/95 dark:bg-[#1a1a1a]/95 backdrop-blur-xl border border-black/10 dark:border-white/10 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 z-50">
-                          <div className="p-1">
-                            <div className="px-3 py-2 text-[10px] font-bold text-black/40 dark:text-white/40 uppercase tracking-wider">
-                              Model Selection
-                            </div>
-                            {freeModels.map((model) => (
-                              <button
-                                key={model.id}
-                                onClick={() => {
-                                  setSelectedModel(model.id);
-                                  setIsModelDropdownOpen(false);
-                                }}
-                                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${
-                                  selectedModel === model.id
-                                    ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' 
-                                    : 'text-black/70 dark:text-white/70 hover:bg-black/5 dark:hover:bg-white/5 hover:text-black dark:hover:text-white'
-                                }`}
-                              >
-                                <span>{model.name}</span>
-                                {selectedModel === model.id && (
-                                  <Check className="w-3.5 h-3.5" />
-                                )}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {false && status === "authenticated" && <div className="w-px h-5 bg-black/10 dark:bg-white/10 mx-1 hidden sm:block"></div>}
-
-                  {status === "authenticated" && (
-                    <button 
-                      onClick={toggleListening}
-                      className={`p-2 rounded-full transition-colors ${isListening ? 'text-red-500 bg-red-500/10 animate-pulse' : 'text-black/40 dark:text-white/40 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5'}`}
-                      title="Voice Dictation"
-                    >
-                      <Mic className="w-5 h-5" strokeWidth={1.5} />
-                    </button>
-                  )}
-
-                  <button 
-                    onClick={handleSubmit}
-                    disabled={(!input?.trim() && !attachedFile) || isGenerating}
-                    className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-200 ${
-                      (!input?.trim() && !attachedFile) || isGenerating
-                        ? 'bg-gray-200 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed' 
-                        : 'bg-black text-white dark:bg-white dark:text-black hover:scale-105 shadow-sm'
-                    }`}
-                    title={(!input?.trim() && !attachedFile) ? (status === "authenticated" ? "Voice Mode" : "Send Message") : "Send Message"}
-                  >
-                    {(!input?.trim() && !attachedFile && status === "authenticated") ? (
-                      <AudioLines className="w-5 h-5" strokeWidth={2} />
-                    ) : (
-                      <ArrowUp className="w-5 h-5" strokeWidth={2.5} />
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Action Buttons */}
-          {false && <div className="flex flex-wrap items-center justify-center gap-3 mt-8 animate-in fade-in slide-in-from-bottom-6 duration-700 delay-200 relative z-20">
-            {status === "authenticated" && (
-              <>
-                {user?.email === 'johnkerveelayese@gmail.com' && (
-                  <>
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setIsDeepSearchMode(!isDeepSearchMode);
-                      }}
-                      className={`flex items-center gap-2 px-5 py-2.5 rounded-full border transition-all text-sm font-medium cursor-pointer ${isDeepSearchMode ? 'border-blue-500/50 bg-blue-500/10 text-blue-500 dark:text-blue-400' : 'border-black/10 dark:border-white/10 bg-white dark:bg-[#121212] hover:bg-black/5 dark:hover:bg-white/5 text-black/70 dark:text-white/70 hover:text-black dark:hover:text-white'}`}
-                    >
-                      <Globe className="w-4 h-4" strokeWidth={1.5} />
-                      DeepSearch
-                    </button>
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setIsImagineMode(!isImagineMode);
-                      }}
-                      className={`flex items-center gap-2 px-5 py-2.5 rounded-full border transition-all text-sm font-medium cursor-pointer ${isImagineMode ? 'border-purple-500/50 bg-purple-500/10 text-purple-600 dark:text-purple-400' : 'border-black/10 dark:border-white/10 bg-white dark:bg-[#121212] hover:bg-black/5 dark:hover:bg-white/5 text-black/70 dark:text-white/70 hover:text-black dark:hover:text-white'}`}
-                    >
-                      <ImageIcon className="w-4 h-4" strokeWidth={1.5} />
-                      Imagine
-                    </button>
-                  </>
-                )}
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    addToast('Personas feature coming soon', 'info');
-                  }}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-full border border-black/10 dark:border-white/10 bg-white dark:bg-[#121212] hover:bg-black/5 dark:hover:bg-white/5 transition-all text-sm font-medium text-black/70 dark:text-white/70 hover:text-black dark:hover:text-white cursor-pointer"
-                >
-                  <Folder className="w-4 h-4" strokeWidth={1.5} />
-                  Pick Personas
-                  <ChevronDown className="w-3 h-3 opacity-50 ml-1" />
-                </button>
-              </>
-            )}
-          </div>}
-        </main>
-
-        {/* Footer */}
-        <footer className="relative z-10 py-8 text-center animate-in fade-in duration-1000 delay-300">
-          <p className="text-xs text-black/30 dark:text-white/30 font-medium">
-            By messaging Chris, you agree to our <a href="#" className="underline hover:text-black/50 dark:hover:text-white/50 transition-colors">Terms</a> and <a href="#" className="underline hover:text-black/50 dark:hover:text-white/50 transition-colors">Privacy Policy</a>.
-          </p>
-        </footer>
-      </div>
-    );
-  }
+  const isLandingPage = messages.length === 0;
 
   return (
     <div className="flex h-[100dvh] w-full bg-white dark:bg-[#050505] text-black dark:text-white font-sans overflow-hidden selection:bg-black/20 dark:selection:bg-white/20">
@@ -1405,7 +1173,7 @@ export default function Chris() {
       <div
         className={`fixed md:relative z-40 h-full flex-shrink-0 transition-all duration-300 ease-in-out border-r border-black/5 dark:border-white/5 bg-neutral-50 dark:bg-[#000000] flex flex-col py-2
           ${isSidebarOpen ? 'translate-x-0 w-[240px]' : '-translate-x-full md:translate-x-0 w-[240px] md:w-[56px]'}
-          ${status === "unauthenticated" ? 'md:hidden' : ''}
+          ${status === "unauthenticated" ? 'hidden' : ''}
         `}
       >
         <div className="flex flex-col h-full w-full overflow-hidden">
@@ -1636,7 +1404,152 @@ export default function Chris() {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col relative min-w-0 bg-white dark:bg-[#000000]">
-        {/* Chat Feed */}
+        {isLandingPage ? (
+          <div className="flex flex-col h-full w-full overflow-hidden relative">
+            {/* Top Nav */}
+            <header className="relative z-20 flex items-center justify-between p-4 md:p-6">
+              <div className="flex items-center gap-2">
+                {!isSidebarOpen && status === "authenticated" && (
+                  <button
+                    onClick={() => setIsSidebarOpen(true)}
+                    className="p-1.5 hover:bg-black/5 dark:hover:bg-white/10 rounded-lg transition-colors md:hidden"
+                  >
+                    <Menu className="w-5 h-5" strokeWidth={1.5} />
+                  </button>
+                )}
+                {status === "unauthenticated" && <PlanetLogo className="w-8 h-8 text-black dark:text-white" />}
+              </div>
+              <div className="flex items-center gap-3 md:gap-4">
+                <ThemeToggle />
+                {status === "authenticated" ? (
+                  <div className="flex items-center gap-3">
+                    <div className="hidden md:flex flex-col items-end">
+                      <span className="text-sm font-bold">{user?.displayName}</span>
+                      <span className="text-[10px] text-black/40 dark:text-white/40">{user?.email}</span>
+                    </div>
+                    <Link 
+                      href="/profile"
+                      className="p-2 text-black/40 dark:text-white/40 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-colors"
+                      title="Profile"
+                    >
+                      <UserIcon className="w-5 h-5" strokeWidth={1.5} />
+                    </Link>
+                  </div>
+                ) : (
+                  <>
+                    <Link href="/login" className="hidden md:block px-5 py-2 text-sm font-medium hover:bg-black/5 dark:hover:bg-white/10 rounded-full transition-colors border border-transparent hover:border-black/10 dark:hover:border-white/10">
+                      Sign in
+                    </Link>
+                    <Link href="/signup" className="px-5 py-2 text-sm font-medium bg-black text-white dark:bg-white dark:text-black rounded-full hover:opacity-90 transition-opacity">
+                      Sign up
+                    </Link>
+                  </>
+                )}
+              </div>
+            </header>
+
+            {/* Main Center Content */}
+            <main className="flex-1 flex flex-col items-center justify-center relative z-10 px-4 -mt-20 w-full max-w-4xl mx-auto">
+              <div className="flex items-center gap-4 mb-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
+                <PlanetLogo className="w-12 h-12 md:w-16 md:h-16 text-black dark:text-white" />
+                <span className="text-5xl md:text-6xl font-semibold tracking-tight">Chris</span>
+              </div>
+
+              {/* Input Bar */}
+              <div className="w-full max-w-[680px] relative animate-in fade-in slide-in-from-bottom-5 duration-700 delay-100 z-30">
+                <div className={`w-full relative bg-gray-50 dark:bg-[#121212] border border-black/10 dark:border-white/10 rounded-[32px] px-4 py-3 shadow-lg transition-all focus-within:border-black/20 dark:focus-within:border-white/20 focus-within:bg-white dark:focus-within:bg-[#121212] flex flex-col gap-2 group ${attachedFile ? 'rounded-[24px]' : ''}`}>
+                  
+                  {/* Attached File Preview */}
+                  {attachedFile && (
+                    <div className="mb-1 flex items-center gap-3 px-1">
+                      <div className="relative group/file">
+                        {attachedFile.mimeType.startsWith('image/') ? (
+                          <img src={`data:${attachedFile.mimeType};base64,${attachedFile.base64}`} alt="preview" className="w-12 h-12 md:w-14 md:h-14 object-cover rounded-xl border border-black/10 dark:border-white/10" />
+                        ) : (
+                          <div className="w-12 h-12 md:w-14 md:h-14 flex items-center justify-center bg-black/5 dark:bg-white/5 rounded-xl border border-black/10 dark:border-white/10">
+                            <FileText className="w-5 h-5 md:w-6 md:h-6 text-black/50 dark:text-white/50" strokeWidth={1.5} />
+                          </div>
+                        )}
+                        <button
+                          onClick={removeFile}
+                          className="absolute -top-2 -right-2 w-6 h-6 bg-white dark:bg-[#222] border border-black/20 dark:border-white/20 rounded-full flex items-center justify-center md:opacity-0 md:group-hover/file:opacity-100 transition-opacity cursor-pointer"
+                        >
+                          <X className="w-3 h-3" strokeWidth={2} />
+                        </button>
+                      </div>
+                      <div className="text-xs text-black/50 dark:text-white/50 truncate max-w-[150px] md:max-w-[200px]">{attachedFile.name}</div>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-3 w-full">
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={handleFileChange}
+                      className="hidden"
+                      accept="image/*,.pdf,.txt"
+                    />
+                    <button 
+                      onClick={() => fileInputRef.current?.click()}
+                      className="p-2 text-black/40 dark:text-white/40 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-colors shrink-0"
+                      title="Attach File"
+                    >
+                      <Paperclip className="w-5 h-5" strokeWidth={1.5} />
+                    </button>
+
+                    <textarea
+                      ref={textareaRef as any}
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      placeholder="What's on your mind?"
+                      className="flex-1 bg-transparent resize-none outline-none text-[16px] placeholder:text-black/30 dark:placeholder:text-white/30 min-h-[24px] max-h-[200px] text-black dark:text-white no-scrollbar py-1"
+                      rows={1}
+                    />
+                    
+                    <div className="flex items-center gap-2 shrink-0">
+                      {status === "authenticated" && (
+                        <button 
+                          onClick={toggleListening}
+                          className={`p-2 rounded-full transition-colors ${isListening ? 'text-red-500 bg-red-500/10 animate-pulse' : 'text-black/40 dark:text-white/40 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5'}`}
+                          title="Voice Dictation"
+                        >
+                          <Mic className="w-5 h-5" strokeWidth={1.5} />
+                        </button>
+                      )}
+
+                      <button 
+                        onClick={handleSubmit}
+                        disabled={(!input?.trim() && !attachedFile) || isGenerating}
+                        className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-200 ${
+                          (!input?.trim() && !attachedFile) || isGenerating
+                            ? 'bg-gray-200 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed' 
+                            : 'bg-black text-white dark:bg-white dark:text-black hover:scale-105 shadow-sm'
+                        }`}
+                        title={(!input?.trim() && !attachedFile) ? (status === "authenticated" ? "Voice Mode" : "Send Message") : "Send Message"}
+                      >
+                        {(!input?.trim() && !attachedFile && status === "authenticated") ? (
+                          <AudioLines className="w-5 h-5" strokeWidth={2} />
+                        ) : (
+                          <ArrowUp className="w-5 h-5" strokeWidth={2.5} />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </main>
+
+            {/* Footer */}
+            <footer className="relative z-10 py-8 text-center animate-in fade-in duration-1000 delay-300">
+              <p className="text-xs text-black/30 dark:text-white/30 font-medium">
+                By messaging Chris, you agree to our <a href="#" className="underline hover:text-black/50 dark:hover:text-white/50 transition-colors">Terms</a> and <a href="#" className="underline hover:text-black/50 dark:hover:text-white/50 transition-colors">Privacy Policy</a>.
+              </p>
+            </footer>
+          </div>
+        ) : (
+          <>
+            {/* Chat Feed */}
         <div className="flex-1 overflow-y-auto premium-scrollbar">
           {/* Header */}
           <header className="sticky top-0 left-0 right-0 h-12 md:h-14 bg-white/80 dark:bg-[#000000]/80 backdrop-blur-xl z-30 flex items-center justify-between px-3 md:px-5">
@@ -2111,8 +2024,8 @@ export default function Chris() {
                 )}
               </div>
             )}
-          </div>
-        </div>
+          </>
+        )}
       </div>
 
       {/* Auth Modal */}
