@@ -296,10 +296,15 @@ export default function Chris() {
 
   const freeModels = [
     { id: 'auto', name: 'Auto' },
-    { id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite' },
-    { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash' },
-    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-    { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro' },
+  ];
+
+  // ... (existing state definitions)
+
+  // Define fallback models for Auto mode
+  const AUTO_MODELS = [
+    'gemini-3.1-flash-lite-preview',
+    'gemini-2.5-flash',
+    'gemini-3-flash-preview'
   ];
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [isListening, setIsListening] = useState(false);
@@ -623,19 +628,34 @@ export default function Chris() {
     if (!ai) return;
 
     setIsGenerating(true);
-    try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.1-flash-lite-preview',
-        contents: `Improve this prompt to be highly detailed and effective for an AI model. Only return the improved prompt, nothing else. Original prompt: "${input}"`
-      });
-      if (response.text) {
-        setInput(response.text.trim());
+    
+    // Use fallback models for prompt enhancement too
+    const candidates = AUTO_MODELS;
+    
+    for (const modelName of candidates) {
+      try {
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: `Improve this prompt to be highly detailed and effective for an AI model. Only return the improved prompt, nothing else. Original prompt: "${input}"`
+        });
+        if (response.text) {
+          setInput(response.text.trim());
+          break; // Success
+        }
+      } catch (error: any) {
+        const isQuotaError = error.message?.toLowerCase().includes('429') || 
+                             error.message?.toLowerCase().includes('quota') || 
+                             error.message?.toLowerCase().includes('exhausted');
+        
+        if (isQuotaError && modelName !== candidates[candidates.length - 1]) {
+          console.warn(`Enhance prompt failed with ${modelName}, retrying...`);
+          continue;
+        }
+        handleError(error); // Only show error on last failure or non-quota error
+        break;
       }
-    } catch (error) {
-      handleError(error);
-    } finally {
-      setIsGenerating(false);
     }
+    setIsGenerating(false);
   };
 
   const handleSubmit = async (e?: React.FormEvent) => {
@@ -731,82 +751,87 @@ export default function Chris() {
         config.thinkingConfig = { thinkingLevel: ThinkingLevel.HIGH };
       }
 
-      let currentModelName = selectedModel;
-      if (currentModelName === 'auto') {
-        currentModelName = 'gemini-3.1-flash-lite-preview';
-      }
-      
-      if (isThinkMode) {
-        currentModelName = 'gemini-3.1-pro-preview';
+      // Determine model candidates
+      let modelCandidates: string[] = [];
+      if (isImagineMode) {
+        modelCandidates = ['gemini-2.5-flash-image'];
+      } else if (isThinkMode) {
+        modelCandidates = ['gemini-3.1-pro-preview'];
       } else if (isMapsMode) {
-        currentModelName = 'gemini-2.5-flash';
-      }
-      
-      if (status === "unauthenticated") {
-        currentModelName = 'gemini-3.1-flash-lite-preview';
+        modelCandidates = ['gemini-2.5-flash'];
+      } else if (isDeepSearchMode) {
+        modelCandidates = ['gemini-3.1-pro-preview', 'gemini-3-flash-preview'];
+      } else {
+        modelCandidates = AUTO_MODELS;
       }
 
-      const cacheKey = JSON.stringify({ contents, config, isImagineMode, isThinkMode, isMapsMode, currentModelName });
       let response;
       let isImageResponse = isImagineMode;
+      let lastError;
 
-      if (aiResponseCache.has(cacheKey)) {
-        response = aiResponseCache.get(cacheKey);
-        // Add a small delay to simulate network request for better UX
-        await new Promise(resolve => setTimeout(resolve, 300));
-      } else {
-        if (isImagineMode) {
-          // Use gemini-2.5-flash-image for image editing or generation
-          const imagineParts: any[] = [];
-          if (currentFile && currentFile.mimeType.startsWith('image/')) {
-            imagineParts.push({
-              inlineData: {
-                data: currentFile.base64,
-                mimeType: currentFile.mimeType
-              }
+      for (const currentModelName of modelCandidates) {
+        try {
+          const cacheKey = JSON.stringify({ contents, config, isImagineMode, isThinkMode, isMapsMode, currentModelName });
+          
+          if (aiResponseCache.has(cacheKey)) {
+            response = aiResponseCache.get(cacheKey);
+            await new Promise(resolve => setTimeout(resolve, 300));
+            break;
+          }
+
+          if (isImagineMode) {
+            // Use gemini-2.5-flash-image for image editing or generation
+            const imagineParts: any[] = [];
+            if (currentFile && currentFile.mimeType.startsWith('image/')) {
+              imagineParts.push({
+                inlineData: {
+                  data: currentFile.base64,
+                  mimeType: currentFile.mimeType
+                }
+              });
+            }
+            if (userText) {
+              imagineParts.push({ text: userText });
+            }
+
+            response = await ai.models.generateContent({
+              model: currentModelName,
+              contents: { parts: imagineParts }
+            });
+          } else {
+            const generateImageFunctionDeclaration: FunctionDeclaration = {
+              name: "generateImage",
+              description: "Generate an image based on a text prompt. Use this tool when the user asks to create, generate, or draw an image or picture.",
+              parameters: {
+                type: Type.OBJECT,
+                properties: {
+                  prompt: {
+                    type: Type.STRING,
+                    description: "A detailed description of the image to generate.",
+                  },
+                },
+                required: ["prompt"],
+              },
+            };
+
+            const currentConfig = { ...config };
+            // Only add the tool if we are not using maps mode, as maps mode restricts other tools
+            if (!isMapsMode && status === "authenticated") {
+              currentConfig.tools = currentConfig.tools || [];
+              currentConfig.tools.push({ functionDeclarations: [generateImageFunctionDeclaration] });
+            }
+            
+            if (currentConfig.tools && currentConfig.tools.length === 0) {
+              delete currentConfig.tools;
+            }
+
+            response = await ai.models.generateContent({
+              model: currentModelName,
+              contents: contents as any,
+              config: currentConfig
             });
           }
-          if (userText) {
-            imagineParts.push({ text: userText });
-          }
 
-          response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash-image',
-            contents: { parts: imagineParts }
-          });
-        } else {
-          const generateImageFunctionDeclaration: FunctionDeclaration = {
-            name: "generateImage",
-            description: "Generate an image based on a text prompt. Use this tool when the user asks to create, generate, or draw an image or picture.",
-            parameters: {
-              type: Type.OBJECT,
-              properties: {
-                prompt: {
-                  type: Type.STRING,
-                  description: "A detailed description of the image to generate.",
-                },
-              },
-              required: ["prompt"],
-            },
-          };
-
-          const currentConfig = { ...config };
-          // Only add the tool if we are not using maps mode, as maps mode restricts other tools
-          if (!isMapsMode && status === "authenticated") {
-            currentConfig.tools = currentConfig.tools || [];
-            currentConfig.tools.push({ functionDeclarations: [generateImageFunctionDeclaration] });
-          }
-          
-          if (currentConfig.tools && currentConfig.tools.length === 0) {
-            delete currentConfig.tools;
-          }
-
-          response = await ai.models.generateContent({
-            model: currentModelName,
-            contents: contents as any,
-            config: currentConfig
-          });
-          
           // Check for native function calls
           const functionCalls = response.functionCalls;
           
@@ -852,8 +877,23 @@ export default function Chris() {
               // Not JSON, ignore
             }
           }
+
+          aiResponseCache.set(cacheKey, response);
+          
+          // If successful, break the loop
+          break;
+        } catch (error: any) {
+          lastError = error;
+          const isQuotaError = error.message?.toLowerCase().includes('429') || 
+                               error.message?.toLowerCase().includes('quota') || 
+                               error.message?.toLowerCase().includes('exhausted');
+          
+          if (isQuotaError && currentModelName !== modelCandidates[modelCandidates.length - 1]) {
+            console.warn(`Model ${currentModelName} failed, retrying with next model...`);
+            continue;
+          }
+          throw error;
         }
-        aiResponseCache.set(cacheKey, response);
       }
 
       const candidate = response.candidates?.[0];
