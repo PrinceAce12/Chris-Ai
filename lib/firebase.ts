@@ -1,20 +1,39 @@
 import { initializeApp, getApp, getApps, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth } from 'firebase/auth';
-import { getFirestore, Firestore } from 'firebase/firestore';
+import { getFirestore, Firestore, initializeFirestore } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
-// Helper to get env var or fallback, ensuring we don't use "undefined" or "null" strings
+// Helper to clean up config values
+const cleanValue = (key: string, val: string) => {
+  if (!val) return '';
+  // Remove "key:" prefix if present (case insensitive), handling optional quotes around the value
+  // e.g. "authDomain: example.com" -> "example.com"
+  // e.g. "authDomain": "example.com" -> "example.com"
+  let cleaned = val.replace(new RegExp(`^["']?${key}["']?\\s*[:=]\\s*`, 'i'), '');
+  
+  // Remove surrounding quotes
+  cleaned = cleaned.replace(/^["']|["']$/g, '').trim();
+  return cleaned;
+};
+
+// Helper to get env var or fallback
 const getEnv = (key: string, value: string | undefined, fallback: string) => {
-  if (!value || value === 'undefined' || value === 'null' || value === 'TODO_KEYHERE' || value.length < 5) return fallback;
+  let val = value;
   
-  // Clean up copy-paste errors like "authDomain: example.com" or '"example.com"'
-  let cleanedValue = value.replace(new RegExp(`^${key}:?\\s*`), '').replace(/^["']|["']$/g, '').trim();
-  
-  if (cleanedValue.length < 5) return fallback;
+  // If env var is missing or invalid, use fallback
+  if (!val || val === 'undefined' || val === 'null' || val === 'TODO_KEYHERE' || val.length < 2) {
+    val = fallback;
+  }
+
+  // Clean whatever value we decided to use
+  const cleaned = cleanValue(key, val);
 
   // If it's an API key, it should start with AIza
-  if (fallback.startsWith('AIza') && !cleanedValue.startsWith('AIza')) return fallback;
-  return cleanedValue;
+  if (key === 'apiKey' && fallback.startsWith('AIza') && !cleaned.startsWith('AIza')) {
+    return fallback;
+  }
+  
+  return cleaned;
 };
 
 const config: Record<string, string> = {};
@@ -33,6 +52,7 @@ addConfig('measurementId', process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID, fire
 
 if (typeof window !== 'undefined') {
   console.log('[Firebase Config Check] Project ID:', config.projectId);
+  console.log('[Firebase Config Check] Auth Domain:', config.authDomain);
   if (!config.apiKey || config.apiKey.length < 10) {
     console.error('[Firebase Config Check] API Key is missing or too short!');
   }
@@ -59,7 +79,18 @@ export const getAuthInstance = (): Auth => {
 export const getDbInstance = (): Firestore => {
   if (!dbInstance) {
     const databaseId = getEnv('firestoreDatabaseId', process.env.NEXT_PUBLIC_FIREBASE_FIRESTORE_DATABASE_ID, firebaseConfig.firestoreDatabaseId);
-    dbInstance = getFirestore(getAppInstance(), databaseId);
+    console.log('[Firebase Config Check] Firestore Database ID:', databaseId);
+    
+    try {
+      // Try to initialize with long polling to fix connection issues
+      dbInstance = initializeFirestore(getAppInstance(), {
+        experimentalForceLongPolling: true,
+      }, databaseId);
+    } catch (e) {
+      // If already initialized or fails, fallback to getFirestore
+      console.warn('Failed to initialize Firestore with settings, falling back to default:', e);
+      dbInstance = getFirestore(getAppInstance(), databaseId);
+    }
   }
   return dbInstance;
 };

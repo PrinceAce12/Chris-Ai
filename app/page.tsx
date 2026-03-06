@@ -28,7 +28,6 @@ import {
   Bell,
   Clock,
   ChevronsLeft,
-  LogOut,
   User as UserIcon,
   ChevronRight,
   Trash2,
@@ -46,7 +45,8 @@ import {
   Info,
   TriangleAlert,
   Rocket,
-  Zap
+  Zap,
+  Locate
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -58,7 +58,6 @@ import {
   onAuthStateChanged, 
   signInWithPopup, 
   GoogleAuthProvider, 
-  signOut,
   User as FirebaseUser
 } from 'firebase/auth';
 import { 
@@ -155,6 +154,7 @@ interface Message {
   groundingChunks?: any[];
   file?: FileAttachment;
   isError?: boolean;
+  mapLocation?: { lat: number; lng: number };
 }
 
 interface Toast {
@@ -229,6 +229,7 @@ export default function Chris() {
       try {
         await getDocFromServer(doc(db, 'test', 'connection'));
       } catch (error) {
+        console.error("Firestore connection test failed:", error);
         if(error instanceof Error && error.message.includes('the client is offline')) {
           console.error("Please check your Firebase configuration.");
         }
@@ -312,6 +313,8 @@ export default function Chris() {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [chatHistory, setChatHistory] = useState<any[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [showLocationConfirmation, setShowLocationConfirmation] = useState(false);
+  const [pendingLocationRequest, setPendingLocationRequest] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -658,9 +661,21 @@ export default function Chris() {
     setIsGenerating(false);
   };
 
-  const handleSubmit = async (e?: React.FormEvent) => {
+  const handleSubmit = async (e?: React.FormEvent, locationOverride?: { latitude: number; longitude: number }) => {
     e?.preventDefault();
-    if ((!input.trim() && !attachedFile) || isGenerating) return;
+    if ((!input.trim() && !attachedFile && !locationOverride) || isGenerating) return;
+
+    if (!locationOverride && status === "authenticated") {
+      const lowerInput = input.toLowerCase();
+      const locationKeywords = ['where am i', 'track my location', 'share my location'];
+      const isLocationRequest = locationKeywords.some(kw => lowerInput.includes(kw));
+
+      if (isLocationRequest && !attachedFile) {
+        setPendingLocationRequest(true);
+        setShowLocationConfirmation(true);
+        return;
+      }
+    }
 
     if (status === "unauthenticated") {
       if (attachedFile || isImagineMode || isMapsMode || isDeepSearchMode || isThinkMode) {
@@ -672,7 +687,10 @@ export default function Chris() {
     const ai = getGenAI();
     if (!ai) return;
 
-    const userText = input.trim();
+    let userText = input.trim();
+    if (locationOverride) {
+      userText = userText ? `${userText}\n[System: User Location: ${locationOverride.latitude}, ${locationOverride.longitude}]` : `[System: User Location: ${locationOverride.latitude}, ${locationOverride.longitude}]`;
+    }
     const currentFile = attachedFile;
 
     setInput('');
@@ -930,7 +948,8 @@ export default function Chris() {
           role: 'ai',
           text: response.text || '',
           isThinking: isThinkMode,
-          groundingChunks: candidate?.groundingMetadata?.groundingChunks
+          groundingChunks: candidate?.groundingMetadata?.groundingChunks,
+          mapLocation: locationOverride ? { lat: locationOverride.latitude, lng: locationOverride.longitude } : undefined
         };
       }
 
@@ -1078,6 +1097,42 @@ export default function Chris() {
     }
   };
 
+  const handleLocationShare = () => {
+    setPendingLocationRequest(false);
+    setShowLocationConfirmation(true);
+  };
+
+  const confirmLocationShare = () => {
+    setShowLocationConfirmation(false);
+    
+    if (!navigator.geolocation) {
+      addToast('Geolocation is not supported by your browser', 'error');
+      return;
+    }
+
+    addToast('Getting location...', 'info');
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        
+        if (pendingLocationRequest) {
+          // Automatic submission with location
+          handleSubmit(undefined, { latitude, longitude });
+        } else {
+          // Manual append to input
+          const locationText = `My current location is: Latitude ${latitude}, Longitude ${longitude}`;
+          setInput((prev) => (prev ? `${prev}\n${locationText}` : locationText));
+          addToast('Location added to input', 'success');
+        }
+      },
+      (error) => {
+        console.error('Error getting location:', error);
+        addToast('Unable to retrieve your location', 'error');
+      }
+    );
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       // Only submit on desktop (md breakpoint is 768px)
@@ -1151,16 +1206,13 @@ export default function Chris() {
                   <span className="text-sm font-bold">{user?.displayName}</span>
                   <span className="text-[10px] text-black/40 dark:text-white/40">{user?.email}</span>
                 </div>
-                <button 
-                  onClick={async () => {
-                    await signOut(auth);
-                    router.refresh();
-                  }}
-                  className="p-2 text-red-500 hover:bg-red-500/10 rounded-full transition-colors"
-                  title="Log Out"
+                <Link 
+                  href="/profile"
+                  className="p-2 text-black/40 dark:text-white/40 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-colors"
+                  title="Profile"
                 >
-                  <LogOut className="w-5 h-5" strokeWidth={1.5} />
-                </button>
+                  <UserIcon className="w-5 h-5" strokeWidth={1.5} />
+                </Link>
               </div>
             ) : (
               <>
@@ -1223,6 +1275,13 @@ export default function Chris() {
                 >
                   <Paperclip className="w-5 h-5" strokeWidth={1.5} />
                 </button>
+                {/* <button 
+                  onClick={handleLocationShare}
+                  className="p-2 text-black/40 dark:text-white/40 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-colors shrink-0"
+                  title="Share Location"
+                >
+                  <Locate className="w-5 h-5" strokeWidth={1.5} />
+                </button> */}
 
                 <textarea
                   ref={textareaRef as any}
@@ -1236,7 +1295,7 @@ export default function Chris() {
                 
                 <div className="flex items-center gap-2 shrink-0">
                   {/* Model Selector */}
-                  {status === "authenticated" && (
+                  {false && status === "authenticated" && (
                     <div className="relative hidden sm:block" ref={modelDropdownRef}>
                       <button
                         onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
@@ -1283,7 +1342,7 @@ export default function Chris() {
                     </div>
                   )}
 
-                  {status === "authenticated" && <div className="w-px h-5 bg-black/10 dark:bg-white/10 mx-1 hidden sm:block"></div>}
+                  {false && status === "authenticated" && <div className="w-px h-5 bg-black/10 dark:bg-white/10 mx-1 hidden sm:block"></div>}
 
                   {status === "authenticated" && (
                     <button 
@@ -1317,29 +1376,33 @@ export default function Chris() {
           </div>
 
           {/* Action Buttons */}
-          <div className="flex flex-wrap items-center justify-center gap-3 mt-8 animate-in fade-in slide-in-from-bottom-6 duration-700 delay-200 relative z-20">
+          {false && <div className="flex flex-wrap items-center justify-center gap-3 mt-8 animate-in fade-in slide-in-from-bottom-6 duration-700 delay-200 relative z-20">
             {status === "authenticated" && (
               <>
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIsDeepSearchMode(!isDeepSearchMode);
-                  }}
-                  className={`flex items-center gap-2 px-5 py-2.5 rounded-full border transition-all text-sm font-medium cursor-pointer ${isDeepSearchMode ? 'border-blue-500/50 bg-blue-500/10 text-blue-500 dark:text-blue-400' : 'border-black/10 dark:border-white/10 bg-white dark:bg-[#121212] hover:bg-black/5 dark:hover:bg-white/5 text-black/70 dark:text-white/70 hover:text-black dark:hover:text-white'}`}
-                >
-                  <Globe className="w-4 h-4" strokeWidth={1.5} />
-                  DeepSearch
-                </button>
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIsImagineMode(!isImagineMode);
-                  }}
-                  className={`flex items-center gap-2 px-5 py-2.5 rounded-full border transition-all text-sm font-medium cursor-pointer ${isImagineMode ? 'border-purple-500/50 bg-purple-500/10 text-purple-600 dark:text-purple-400' : 'border-black/10 dark:border-white/10 bg-white dark:bg-[#121212] hover:bg-black/5 dark:hover:bg-white/5 text-black/70 dark:text-white/70 hover:text-black dark:hover:text-white'}`}
-                >
-                  <ImageIcon className="w-4 h-4" strokeWidth={1.5} />
-                  Imagine
-                </button>
+                {user?.email === 'johnkerveelayese@gmail.com' && (
+                  <>
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsDeepSearchMode(!isDeepSearchMode);
+                      }}
+                      className={`flex items-center gap-2 px-5 py-2.5 rounded-full border transition-all text-sm font-medium cursor-pointer ${isDeepSearchMode ? 'border-blue-500/50 bg-blue-500/10 text-blue-500 dark:text-blue-400' : 'border-black/10 dark:border-white/10 bg-white dark:bg-[#121212] hover:bg-black/5 dark:hover:bg-white/5 text-black/70 dark:text-white/70 hover:text-black dark:hover:text-white'}`}
+                    >
+                      <Globe className="w-4 h-4" strokeWidth={1.5} />
+                      DeepSearch
+                    </button>
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsImagineMode(!isImagineMode);
+                      }}
+                      className={`flex items-center gap-2 px-5 py-2.5 rounded-full border transition-all text-sm font-medium cursor-pointer ${isImagineMode ? 'border-purple-500/50 bg-purple-500/10 text-purple-600 dark:text-purple-400' : 'border-black/10 dark:border-white/10 bg-white dark:bg-[#121212] hover:bg-black/5 dark:hover:bg-white/5 text-black/70 dark:text-white/70 hover:text-black dark:hover:text-white'}`}
+                    >
+                      <ImageIcon className="w-4 h-4" strokeWidth={1.5} />
+                      Imagine
+                    </button>
+                  </>
+                )}
                 <button 
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1353,7 +1416,7 @@ export default function Chris() {
                 </button>
               </>
             )}
-          </div>
+          </div>}
         </main>
 
         {/* Footer */}
@@ -1369,6 +1432,39 @@ export default function Chris() {
   return (
     <div className="flex h-[100dvh] w-full bg-white dark:bg-[#050505] text-black dark:text-white font-sans overflow-hidden selection:bg-black/20 dark:selection:bg-white/20">
       {renderToasts()}
+
+      {/* Location Confirmation Modal */}
+      {showLocationConfirmation && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#1a1a1a] rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-black/10 dark:border-white/10 animate-in zoom-in-95 duration-200">
+            <div className="flex flex-col items-center text-center gap-4">
+              <div className="w-12 h-12 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-600 dark:text-blue-400">
+                <Locate className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-black dark:text-white mb-1">Share Location?</h3>
+                <p className="text-sm text-black/60 dark:text-white/60">
+                  Chris needs permission to access your current location to provide relevant information.
+                </p>
+              </div>
+              <div className="flex gap-3 w-full mt-2">
+                <button
+                  onClick={() => setShowLocationConfirmation(false)}
+                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium text-black/70 dark:text-white/70 hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmLocationShare}
+                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors shadow-lg shadow-blue-500/20"
+                >
+                  Allow Access
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Mobile Sidebar Overlay */}
       {isSidebarOpen && (
@@ -1404,7 +1500,7 @@ export default function Chris() {
           {/* Nav Items */}
           <div className="flex flex-col gap-1 mb-2 shrink-0">
             {/* Search */}
-            {status === "authenticated" && (
+            {status === "authenticated" && user?.email === 'johnkerveelayese@gmail.com' && (
               <button className={`group flex items-center rounded-xl transition-all duration-300 h-9 ${isSidebarOpen ? 'bg-black/5 dark:bg-[#1a1a1a] hover:bg-black/10 dark:hover:bg-[#222] w-[calc(100%-16px)]' : 'hover:bg-black/5 dark:hover:bg-white/10 w-[40px]'} mx-2`}>
                 <div className="w-[40px] h-full flex items-center justify-center shrink-0">
                   <Search className={`w-[18px] h-[18px] shrink-0 ${isSidebarOpen ? 'text-black/70 dark:text-white/70 group-hover:text-black dark:group-hover:text-white' : 'text-black/70 dark:text-white/70'} transition-colors`} strokeWidth={2} />
@@ -1440,7 +1536,7 @@ export default function Chris() {
             )}
 
             {/* Imagine */}
-            {status === "authenticated" && (
+            {status === "authenticated" && user?.email === 'johnkerveelayese@gmail.com' && (
               <button onClick={() => setIsImagineMode(!isImagineMode)} className={`group flex items-center rounded-xl transition-all duration-300 h-9 relative ${isImagineMode ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400' : 'hover:bg-black/5 dark:hover:bg-white/10'} ${isSidebarOpen ? 'w-[calc(100%-16px)]' : 'w-[40px]'} mx-2`}>
                 <div className="w-[40px] h-full flex items-center justify-center shrink-0">
                   <ImageIcon className="w-[18px] h-[18px] shrink-0 transition-colors" strokeWidth={2} />
@@ -1540,7 +1636,8 @@ export default function Chris() {
           {/* Bottom Section */}
           <div className={`relative mt-auto shrink-0 w-full transition-all duration-300 ease-in-out ${isSidebarOpen ? 'h-[56px]' : 'h-[88px]'}`}>
             {status === "authenticated" ? (
-              <div 
+              <Link 
+                href="/profile"
                 className={`absolute w-8 h-8 rounded-full bg-pink-500 text-white flex items-center justify-center font-medium text-sm cursor-pointer transition-all duration-300 ease-in-out ${
                   isSidebarOpen 
                     ? 'left-[12px] bottom-[12px] translate-x-0' 
@@ -1549,7 +1646,7 @@ export default function Chris() {
                 title={user?.email || ''}
               >
                 {user?.displayName?.[0] || user?.email?.[0] || "J"}
-              </div>
+              </Link>
             ) : (
               <Link 
                 href="/login" 
@@ -1733,6 +1830,26 @@ export default function Chris() {
                         {msg.text}
                       </Markdown>
                     </div>
+
+                    {msg.mapLocation && (
+                      <div className="mt-4 pt-4 border-t border-black/10 dark:border-white/10">
+                        <div className="flex items-center gap-2 text-xs font-medium text-black/50 dark:text-white/50 mb-3">
+                          <MapPin className="w-3.5 h-3.5" strokeWidth={1.5} />
+                          Shared Location
+                        </div>
+                        <div className="w-full rounded-xl overflow-hidden border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5">
+                          <iframe
+                            width="100%"
+                            height="240"
+                            style={{ border: 0 }}
+                            loading="lazy"
+                            allowFullScreen
+                            referrerPolicy="no-referrer-when-downgrade"
+                            src={`https://maps.google.com/maps?q=${msg.mapLocation.lat},${msg.mapLocation.lng}&z=15&output=embed`}
+                          ></iframe>
+                        </div>
+                      </div>
+                    )}
 
                     {msg.role === 'ai' && msg.groundingChunks && msg.groundingChunks.length > 0 && (
                       <div className="mt-4 pt-4 border-t border-black/10 dark:border-white/10">
@@ -1919,6 +2036,13 @@ export default function Chris() {
                 >
                   <Paperclip className="w-4 h-4" strokeWidth={1.5} />
                 </button>
+                <button 
+                  onClick={handleLocationShare}
+                  className="p-1.5 mb-0.5 text-black/40 dark:text-white/40 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-colors shrink-0"
+                  title="Share Location"
+                >
+                  <Locate className="w-4 h-4" strokeWidth={1.5} />
+                </button>
 
                 <textarea
                   ref={textareaRef as any}
@@ -1932,7 +2056,7 @@ export default function Chris() {
 
                 <div className="flex items-center gap-1.5 shrink-0 mb-0.5">
                   {/* Model Selector */}
-                  {status === "authenticated" && (
+                  {false && status === "authenticated" && (
                     <div className="relative hidden sm:block" ref={modelDropdownRef}>
                       <button
                         onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
@@ -1979,7 +2103,7 @@ export default function Chris() {
                     </div>
                   )}
 
-                  {status === "authenticated" && <div className="w-px h-4 bg-black/10 dark:bg-white/10 mx-0.5 hidden sm:block"></div>}
+                  {false && status === "authenticated" && <div className="w-px h-4 bg-black/10 dark:bg-white/10 mx-0.5 hidden sm:block"></div>}
 
                   {status === "authenticated" && (
                     <button 
@@ -2014,20 +2138,24 @@ export default function Chris() {
             {/* Mode Toggles */}
             {status === "authenticated" && (
               <div className="flex flex-wrap items-center justify-center gap-2 mt-1 px-2 pb-1 overflow-x-auto no-scrollbar w-full max-w-[760px]">
-                <button 
-                  onClick={() => setIsDeepSearchMode(!isDeepSearchMode)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all duration-300 text-[12px] font-medium border cursor-pointer ${isDeepSearchMode ? 'bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400' : 'bg-transparent border-black/10 dark:border-white/10 text-black/60 dark:text-white/60 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5'}`}
-                >
-                  <Globe className="w-3.5 h-3.5" strokeWidth={1.5} />
-                  <span>Search</span>
-                </button>
-                <button 
-                  onClick={() => setIsThinkMode(!isThinkMode)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all duration-300 text-[12px] font-medium border cursor-pointer ${isThinkMode ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400' : 'bg-transparent border-black/10 dark:border-white/10 text-black/60 dark:text-white/60 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5'}`}
-                >
-                  <BrainCircuit className="w-3.5 h-3.5" strokeWidth={1.5} />
-                  <span>Think</span>
-                </button>
+                {user?.email === 'johnkerveelayese@gmail.com' && (
+                  <>
+                    <button 
+                      onClick={() => setIsDeepSearchMode(!isDeepSearchMode)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all duration-300 text-[12px] font-medium border cursor-pointer ${isDeepSearchMode ? 'bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400' : 'bg-transparent border-black/10 dark:border-white/10 text-black/60 dark:text-white/60 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5'}`}
+                    >
+                      <Globe className="w-3.5 h-3.5" strokeWidth={1.5} />
+                      <span>Search</span>
+                    </button>
+                    <button 
+                      onClick={() => setIsThinkMode(!isThinkMode)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all duration-300 text-[12px] font-medium border cursor-pointer ${isThinkMode ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400' : 'bg-transparent border-black/10 dark:border-white/10 text-black/60 dark:text-white/60 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5'}`}
+                    >
+                      <BrainCircuit className="w-3.5 h-3.5" strokeWidth={1.5} />
+                      <span>Think</span>
+                    </button>
+                  </>
+                )}
                 <button 
                   onClick={() => setIsMapsMode(!isMapsMode)}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all duration-300 text-[12px] font-medium border cursor-pointer ${isMapsMode ? 'bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400' : 'bg-transparent border-black/10 dark:border-white/10 text-black/60 dark:text-white/60 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5'}`}
@@ -2035,13 +2163,15 @@ export default function Chris() {
                   <MapPin className="w-3.5 h-3.5" strokeWidth={1.5} />
                   <span>Maps</span>
                 </button>
-                <button 
-                  onClick={() => setIsImagineMode(!isImagineMode)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all duration-300 text-[12px] font-medium border cursor-pointer ${isImagineMode ? 'bg-purple-500/10 border-purple-500/30 text-purple-600 dark:text-purple-400' : 'bg-transparent border-black/10 dark:border-white/10 text-black/60 dark:text-white/60 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5'}`}
-                >
-                  <ImageIcon className="w-3.5 h-3.5" strokeWidth={1.5} />
-                  <span>Imagine</span>
-                </button>
+                {user?.email === 'johnkerveelayese@gmail.com' && (
+                  <button 
+                    onClick={() => setIsImagineMode(!isImagineMode)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all duration-300 text-[12px] font-medium border cursor-pointer ${isImagineMode ? 'bg-purple-500/10 border-purple-500/30 text-purple-600 dark:text-purple-400' : 'bg-transparent border-black/10 dark:border-white/10 text-black/60 dark:text-white/60 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5'}`}
+                  >
+                    <ImageIcon className="w-3.5 h-3.5" strokeWidth={1.5} />
+                    <span>Imagine</span>
+                  </button>
+                )}
               </div>
             )}
           </div>
