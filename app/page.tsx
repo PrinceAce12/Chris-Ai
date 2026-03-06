@@ -173,6 +173,16 @@ import { ThemeToggle } from '@/components/theme-toggle';
 // --- Simple Memory Cache for AI Responses ---
 const aiResponseCache = new Map<string, any>();
 
+const trackLocationFunctionDeclaration: FunctionDeclaration = {
+  name: "trackLocation",
+  parameters: {
+    type: Type.OBJECT,
+    description: "Enable location tracking when the user asks to track or locate their position.",
+    properties: {},
+    required: [],
+  },
+};
+
 // --- Main Component ---
 export default function Chris() {
   const router = useRouter();
@@ -180,6 +190,12 @@ export default function Chris() {
   const [status, setStatus] = useState<"loading" | "authenticated" | "unauthenticated">("loading");
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
+
+  useEffect(() => {
+    if (status === "unauthenticated") {
+      router.push('/landing');
+    }
+  }, [status, router]);
 
   useEffect(() => {
     // Test Firestore connection
@@ -219,6 +235,7 @@ export default function Chris() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isWaiting, setIsWaiting] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isThinkMode, setIsThinkMode] = useState(false);
   const [isDeepSearchMode, setIsDeepSearchMode] = useState(false);
@@ -674,6 +691,7 @@ export default function Chris() {
 
     setMessages((prev) => [...prev, newUserMessage]);
     setIsGenerating(true);
+    setIsWaiting(true);
 
     try {
       // Build history for context (limit to last 15 messages)
@@ -715,12 +733,13 @@ export default function Chris() {
       const contents = [...historyContents, { role: 'user', parts: currentParts }];
 
       const config: any = {};
+      config.tools = config.tools || [];
+      config.tools.push({ functionDeclarations: [trackLocationFunctionDeclaration] });
+
       if (isDeepSearchMode) {
-        config.tools = config.tools || [];
         config.tools.push({ googleSearch: {} });
       }
       if (isMapsMode) {
-        config.tools = config.tools || [];
         config.tools.push({ googleMaps: {} });
         if (userLocation) {
           config.toolConfig = {
@@ -883,6 +902,14 @@ export default function Chris() {
         }
       }
 
+      if (response && response.functionCalls) {
+        for (const call of response.functionCalls) {
+          if (call.name === 'trackLocation') {
+            setIsMapsMode(true);
+          }
+        }
+      }
+
       const candidate = response.candidates?.[0];
       const finishReason = candidate?.finishReason;
 
@@ -923,6 +950,7 @@ export default function Chris() {
       }
 
       setMessages((prev) => [...prev, aiMessage]);
+      setIsWaiting(false);
 
       // --- Save to Database if Authenticated ---
       if (status === "authenticated" && user) {
@@ -985,6 +1013,7 @@ export default function Chris() {
       }
     } finally {
       setIsGenerating(false);
+      setIsWaiting(false);
     }
   };
 
@@ -1827,7 +1856,7 @@ export default function Chris() {
                         )}
                       </div>
                     )}
-                    {msg.role === 'ai' && (
+                    {msg.role === 'ai' && !msg.shouldAnimate && (
                       <div className="flex flex-col gap-3 mt-3 w-full">
                         <div className="flex items-center gap-1 text-black/40 dark:text-white/40">
                           <button 
@@ -1893,7 +1922,7 @@ export default function Chris() {
                   </div>
                 </div>
               ))}
-            {isGenerating && (
+            {isWaiting && (
               <div className="flex items-start justify-start w-full py-8 px-4 md:px-5 text-black dark:text-white">
                 <Mirage
                   size="60"

@@ -12,7 +12,7 @@ export function TypewriterMessage({ text, onComplete }: { text: string, onComple
       const timeout = setTimeout(() => {
         setDisplayedText(prev => prev + text[currentIndex]);
         setCurrentIndex(prev => prev + 1);
-      }, 10); // Adjust speed here
+      }, 5); // Adjust speed here
       return () => clearTimeout(timeout);
     } else {
       onComplete?.();
