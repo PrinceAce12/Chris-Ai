@@ -779,6 +779,8 @@ export default function Chris() {
         modelCandidates = ['gemini-2.5-flash'];
       } else if (isDeepSearchMode) {
         modelCandidates = ['gemini-3.1-pro-preview', 'gemini-3-flash-preview'];
+      } else if (selectedModel !== 'auto') {
+        modelCandidates = [selectedModel];
       } else {
         modelCandidates = AUTO_MODELS;
       }
@@ -902,15 +904,14 @@ export default function Chris() {
           break;
         } catch (error: any) {
           lastError = error;
-          const isQuotaError = error.message?.toLowerCase().includes('429') || 
-                               error.message?.toLowerCase().includes('quota') || 
-                               error.message?.toLowerCase().includes('exhausted');
+          console.warn(`Model ${currentModelName} failed:`, error);
           
-          if (isQuotaError && currentModelName !== modelCandidates[modelCandidates.length - 1]) {
-            console.warn(`Model ${currentModelName} failed, retrying with next model...`);
-            continue;
+          // If it's the last candidate, throw
+          if (currentModelName === modelCandidates[modelCandidates.length - 1]) {
+             throw error;
           }
-          throw error;
+          // Otherwise continue to next model
+          continue;
         }
       }
 
