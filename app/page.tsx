@@ -1624,10 +1624,8 @@ export default function Chris() {
 
           <div className="px-3 md:px-8 pt-6 md:pt-8 pb-16 md:pb-20">
             {isLoadingChat ? (
-              <div className="flex h-[50vh] w-full items-center justify-center">
-                <div className="animate-pulse">
-                  <PlanetLogo className="w-12 h-12 text-black dark:text-white" />
-                </div>
+              <div className="flex h-[50vh] w-full items-center justify-center text-black dark:text-white">
+                <Mirage size="60" speed="2.5" color="currentColor" />
               </div>
             ) : (
               <div className="max-w-3xl mx-auto w-full flex flex-col gap-6 md:gap-8">
