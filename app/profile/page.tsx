@@ -64,6 +64,7 @@ export default function ProfilePage() {
           <div className="flex flex-col items-center mb-8">
             <div className="w-24 h-24 rounded-full bg-pink-500 text-white flex items-center justify-center text-4xl font-medium mb-4 shadow-lg">
               {user.photoURL ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
                 <img 
                   src={user.photoURL} 
                   alt={user.displayName || 'User'} 

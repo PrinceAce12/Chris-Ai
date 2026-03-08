@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI, Type, ThinkingLevel, FunctionDeclaration } from '@google/genai';
 import { Mirage } from 'ldrs/react'
 import 'ldrs/react/Mirage.css'
-import { useRouter } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   Menu,
@@ -305,7 +305,9 @@ export default function Chris() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [isListening, setIsListening] = useState(false);
   const [isClient, setIsClient] = useState(false);
-  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const params = useParams();
+  const urlChatId = params?.chatId as string | undefined;
+  const [currentChatId, setCurrentChatId] = useState<string | null>(urlChatId || null);
   const [chatHistory, setChatHistory] = useState<any[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
@@ -352,11 +354,27 @@ export default function Chris() {
     }
   }, [status, user]);
 
-  const loadChat = async (chat: any) => {
-    setCurrentChatId(chat.id);
+  const hasLoadedInitialChat = useRef(false);
+
+  // Load chat from URL
+  useEffect(() => {
+    if (status === "authenticated" && user) {
+      if (urlChatId && (!hasLoadedInitialChat.current || urlChatId !== currentChatId)) {
+        loadChat(urlChatId);
+      } else if (!urlChatId && currentChatId) {
+        setCurrentChatId(null);
+        setMessages([]);
+      }
+      hasLoadedInitialChat.current = true;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlChatId, status, user, currentChatId]);
+
+  async function loadChat(chatId: string) {
+    setCurrentChatId(chatId);
     setIsGenerating(true);
     try {
-      const messagesRef = collection(db, "chats", chat.id, "messages");
+      const messagesRef = collection(db, "chats", chatId, "messages");
       const q = query(messagesRef, orderBy("createdAt", "asc"));
       const snapshot = await getDocs(q);
       const loadedMessages = snapshot.docs.map(doc => ({
@@ -367,8 +385,11 @@ export default function Chris() {
         createdAt: doc.data().createdAt?.toDate() || new Date()
       }));
       setMessages(loadedMessages);
+      if (window.location.pathname !== `/c/${chatId}`) {
+        router.push(`/c/${chatId}`);
+      }
     } catch (error) {
-      handleFirestoreError(error, OperationType.LIST, `chats/${chat.id}/messages`);
+      handleFirestoreError(error, OperationType.LIST, `chats/${chatId}/messages`);
     } finally {
       setIsGenerating(false);
     }
@@ -378,6 +399,9 @@ export default function Chris() {
   const startNewChat = () => {
     setCurrentChatId(null);
     setMessages([]);
+    if (window.location.pathname !== '/') {
+      router.push('/');
+    }
     if (window.innerWidth < 768) setIsSidebarOpen(false);
   };
 
@@ -413,6 +437,9 @@ export default function Chris() {
     setMessages([]);
     localStorage.removeItem('chrisai_messages');
     setCurrentChatId(null);
+    if (window.location.pathname !== '/') {
+      router.push('/');
+    }
     if (window.innerWidth < 768) setIsSidebarOpen(false);
   };
 
@@ -425,6 +452,9 @@ export default function Chris() {
       if (currentChatId === chatId) {
         setCurrentChatId(null);
         setMessages([]);
+        if (window.location.pathname !== '/') {
+          router.push('/');
+        }
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `chats/${chatId}`);
@@ -969,6 +999,9 @@ export default function Chris() {
               updatedAt: serverTimestamp()
             });
             setCurrentChatId(chatId);
+            if (window.location.pathname !== `/c/${chatId}`) {
+              router.push(`/c/${chatId}`);
+            }
           } else {
             // Update chat timestamp
             await setDoc(doc(db, "chats", chatId), {
@@ -1304,7 +1337,7 @@ export default function Chris() {
                             {chats.map((chat) => (
                               <div key={chat.id} className="relative group/item">
                                 <button 
-                                  onClick={() => loadChat(chat)}
+                                  onClick={() => loadChat(chat.id)}
                                   className={`w-full text-left text-[13px] font-medium truncate transition-all flex items-center gap-2 px-2.5 py-1.5 rounded-lg group ${currentChatId === chat.id ? 'bg-black/10 dark:bg-[#1a1a1a] text-black dark:text-white' : 'text-black/60 dark:text-white/60 hover:text-black dark:hover:text-white'}`}
                                 >
                                   <span className="truncate flex-1">{chat.title || "Untitled Chat"}</span>
@@ -1388,6 +1421,7 @@ export default function Chris() {
             className="relative max-w-full max-h-full flex items-center justify-center"
             onClick={(e) => e.stopPropagation()}
           >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img 
               src={previewImage} 
               alt="Preview" 
@@ -1464,6 +1498,7 @@ export default function Chris() {
                     <div className="mb-1 flex items-center gap-3 px-1">
                       <div className="relative group/file">
                         {attachedFile.mimeType.startsWith('image/') ? (
+                          /* eslint-disable-next-line @next/next/no-img-element */
                           <img src={`data:${attachedFile.mimeType};base64,${attachedFile.base64}`} alt="preview" className="w-12 h-12 md:w-14 md:h-14 object-cover rounded-xl border border-black/10 dark:border-white/10" />
                         ) : (
                           <div className="w-12 h-12 md:w-14 md:h-14 flex items-center justify-center bg-black/5 dark:bg-white/5 rounded-xl border border-black/10 dark:border-white/10">
@@ -1615,6 +1650,7 @@ export default function Chris() {
                     {msg.file && (
                       msg.role === 'ai' && msg.file.mimeType.startsWith('image/') ? (
                         <div className="mb-3 relative group w-fit cursor-pointer" onClick={() => setPreviewImage(`data:${msg.file!.mimeType};base64,${msg.file!.base64}`)}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src={`data:${msg.file.mimeType};base64,${msg.file.base64}`} alt="Generated image" className="max-w-full rounded-2xl border border-black/10 dark:border-white/10 shadow-sm transition-transform duration-300 group-hover:scale-[1.02]" />
                           
                           {/* Watermark */}
@@ -1636,6 +1672,7 @@ export default function Chris() {
                       ) : (
                         <div className="mb-2 flex items-center gap-2 p-1.5 rounded-lg bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 w-fit">
                           {msg.file.mimeType.startsWith('image/') ? (
+                            /* eslint-disable-next-line @next/next/no-img-element */
                             <img src={`data:${msg.file.mimeType};base64,${msg.file.base64}`} alt="attachment" className="w-10 h-10 object-cover rounded-md" />
                           ) : (
                             <div className="w-10 h-10 flex items-center justify-center bg-black/10 dark:bg-white/10 rounded-md">
@@ -1859,6 +1896,7 @@ export default function Chris() {
                 <div className="mb-1 flex items-center gap-3 px-2">
                   <div className="relative group/file">
                     {attachedFile.mimeType.startsWith('image/') ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
                       <img src={`data:${attachedFile.mimeType};base64,${attachedFile.base64}`} alt="preview" className="w-10 h-10 md:w-12 md:h-12 object-cover rounded-xl border border-black/10 dark:border-white/10" />
                     ) : (
                       <div className="w-10 h-10 md:w-12 md:h-12 flex items-center justify-center bg-black/5 dark:bg-white/5 rounded-xl border border-black/10 dark:border-white/10">
@@ -2024,9 +2062,11 @@ export default function Chris() {
                 )}
               </div>
             )}
-          </>
-        )}
-      </div>
+          </div>
+        </div>
+      </>
+    )}
+  </div>
 
       {/* Auth Modal */}
       {showAuthModal && (
