@@ -318,6 +318,57 @@ export default function Chris() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
+  
+  // --- Undo/Redo History ---
+  const historyRef = useRef<string[]>(['']);
+  const historyPointerRef = useRef<number>(0);
+  const historyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const saveToHistory = (value: string) => {
+    const currentHistory = historyRef.current;
+    const pointer = historyPointerRef.current;
+    // If the value is the same as the current history tip, don't duplicate
+    if (currentHistory[pointer] === value) return;
+
+    const newHistory = currentHistory.slice(0, pointer + 1);
+    newHistory.push(value);
+    historyRef.current = newHistory;
+    historyPointerRef.current = newHistory.length - 1;
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newValue = e.target.value;
+    setInput(newValue);
+
+    if (historyTimeoutRef.current) {
+      clearTimeout(historyTimeoutRef.current);
+    }
+
+    historyTimeoutRef.current = setTimeout(() => {
+      saveToHistory(newValue);
+    }, 500);
+  };
+
+  const undo = () => {
+    const currentSaved = historyRef.current[historyPointerRef.current];
+    // If we have unsaved changes (input differs from last saved state), revert to last saved state first
+    if (input !== currentSaved) {
+      setInput(currentSaved);
+      return;
+    }
+
+    if (historyPointerRef.current > 0) {
+      historyPointerRef.current -= 1;
+      setInput(historyRef.current[historyPointerRef.current]);
+    }
+  };
+
+  const redo = () => {
+    if (historyPointerRef.current < historyRef.current.length - 1) {
+      historyPointerRef.current += 1;
+      setInput(historyRef.current[historyPointerRef.current]);
+    }
+  };
 
   // --- Click Outside Handler ---
   useEffect(() => {
@@ -688,9 +739,11 @@ export default function Chris() {
     setIsGenerating(false);
   };
 
-  const handleSubmit = async (e?: React.FormEvent) => {
+  const handleSubmit = async (e?: React.FormEvent, overrideText?: string) => {
     e?.preventDefault();
-    if ((!input.trim() && !attachedFile) || isGenerating) return;
+    const textToSubmit = overrideText !== undefined ? overrideText : input;
+    
+    if ((!textToSubmit.trim() && !attachedFile) || isGenerating) return;
 
     if (status === "unauthenticated") {
       if (attachedFile || isImagineMode || isMapsMode || isDeepSearchMode || isThinkMode) {
@@ -702,7 +755,13 @@ export default function Chris() {
     const ai = getGenAI();
     if (!ai) return;
 
-    let userText = input.trim();
+    let userText = textToSubmit.trim();
+    
+    // Save current input to history before clearing, so user can undo the clear
+    if (!overrideText) {
+      saveToHistory(input);
+    }
+
     const currentFile = attachedFile;
 
     setInput('');
@@ -1134,7 +1193,68 @@ export default function Chris() {
 
 
 
+  const handleRegenerate = (msgId: string) => {
+    const msgIndex = messages.findIndex(m => m.id === msgId);
+    if (msgIndex === -1) return;
+
+    // Find the preceding user message
+    const userMsgIndex = msgIndex - 1;
+    if (userMsgIndex >= 0 && messages[userMsgIndex].role === 'user') {
+      const userMsg = messages[userMsgIndex];
+      
+      // Remove the AI response and the user message
+      setMessages(prev => prev.slice(0, userMsgIndex));
+      
+      // Trigger submit with the user message text
+      handleSubmit(undefined, userMsg.text);
+    }
+  };
+
+  const handleEditUserMessage = (msgId: string) => {
+    const msgIndex = messages.findIndex(m => m.id === msgId);
+    if (msgIndex === -1) return;
+
+    const msg = messages[msgIndex];
+    setInput(msg.text);
+    // Remove this message and all subsequent messages
+    setMessages(prev => prev.slice(0, msgIndex));
+    if (textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  };
+
+  const handleReadAloud = (text: string) => {
+    if (!window.speechSynthesis) {
+      addToast('Text-to-speech not supported', 'error');
+      return;
+    }
+    const utterance = new SpeechSynthesisUtterance(text);
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const handleCopy = (text: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      addToast('Copied to clipboard', 'success');
+    }).catch(() => {
+      addToast('Failed to copy', 'error');
+    });
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Undo: Ctrl+Z
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+      e.preventDefault();
+      undo();
+      return;
+    }
+
+    // Redo: Ctrl+Y or Ctrl+Shift+Z
+    if (((e.ctrlKey || e.metaKey) && e.key === 'y') || ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'z')) {
+      e.preventDefault();
+      redo();
+      return;
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       // Only submit on desktop (md breakpoint is 768px)
       if (window.innerWidth >= 768) {
@@ -1521,7 +1641,7 @@ export default function Chris() {
                     <textarea
                       ref={textareaRef as any}
                       value={input}
-                      onChange={(e) => setInput(e.target.value)}
+                      onChange={handleInputChange}
                       onKeyDown={handleKeyDown}
                       placeholder="What's on your mind?"
                       className="flex-1 bg-transparent resize-none outline-none text-[16px] placeholder:text-black/30 dark:placeholder:text-white/30 min-h-[24px] max-h-[200px] text-black dark:text-white no-scrollbar py-1"
@@ -1630,7 +1750,7 @@ export default function Chris() {
             ) : (
               <div className="max-w-3xl mx-auto w-full flex flex-col gap-6 md:gap-8">
                 {messages.map((msg) => (
-                <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                <div key={msg.id} className={`flex flex-col group ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                   <div
                     className={`max-w-[92%] md:max-w-[85%] px-4 py-3 md:px-5 md:py-3.5 ${
                       msg.role === 'user'
@@ -1801,56 +1921,48 @@ export default function Chris() {
                       <div className="flex flex-col gap-3 mt-3 w-full">
                         <div className="flex items-center gap-1 text-black/40 dark:text-white/40">
                           <button 
-                            onClick={() => {
-                              // Placeholder for regenerate logic
-                              addToast('Regeneration not implemented yet', 'info');
-                            }}
+                            onClick={() => handleRegenerate(msg.id)}
                             className="p-1 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors" 
                             title="Regenerate"
                           >
                             <RefreshCw className="w-3.5 h-3.5" />
                           </button>
                           <button 
-                            onClick={() => addToast('Reading aloud...', 'info')}
-                            className="p-1 hover:text-white hover:bg-white/5 rounded-md transition-colors" 
+                            onClick={() => handleReadAloud(msg.text)}
+                            className="p-1 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors" 
                             title="Read Aloud"
                           >
                             <Volume2 className="w-3.5 h-3.5" />
                           </button>
                           <button 
-                            onClick={() => {
-                              navigator.clipboard.writeText(msg.text);
-                              addToast('Message copied to clipboard', 'success');
-                            }}
-                            className="p-1 hover:text-white hover:bg-white/5 rounded-md transition-colors" 
+                            onClick={() => handleCopy(msg.text)}
+                            className="p-1 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors" 
                             title="Copy"
                           >
                             <Copy className="w-3.5 h-3.5" />
                           </button>
                           <button 
-                            onClick={() => {
-                              addToast('Share link copied', 'success');
-                            }}
-                            className="p-1 hover:text-white hover:bg-white/5 rounded-md transition-colors" 
+                            onClick={() => handleCopy(msg.text)}
+                            className="p-1 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors" 
                             title="Share"
                           >
                             <Share className="w-3.5 h-3.5" />
                           </button>
                           <button 
                             onClick={() => addToast('Thanks for the feedback!', 'success')}
-                            className="p-1 hover:text-white hover:bg-white/5 rounded-md transition-colors" 
+                            className="p-1 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors" 
                             title="Good Response"
                           >
                             <ThumbsUp className="w-3.5 h-3.5" />
                           </button>
                           <button 
                             onClick={() => addToast('Thanks for the feedback!', 'success')}
-                            className="p-1 hover:text-white hover:bg-white/5 rounded-md transition-colors" 
+                            className="p-1 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors" 
                             title="Bad Response"
                           >
                             <ThumbsDown className="w-3.5 h-3.5" />
                           </button>
-                          <button className="p-1 hover:text-white hover:bg-white/5 rounded-md transition-colors" title="More Options">
+                          <button className="p-1 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors" title="More Options">
                             <MoreHorizontal className="w-3.5 h-3.5" />
                           </button>
                           <span className="text-[10px] ml-1.5 opacity-50">1.1s</span>
@@ -1858,6 +1970,25 @@ export default function Chris() {
                         </div>
                         
 
+                      </div>
+                    )}
+
+                    {msg.role === 'user' && (
+                      <div className="flex items-center justify-end gap-1 mt-2 text-black/40 dark:text-white/40 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button 
+                          onClick={() => handleEditUserMessage(msg.id)}
+                          className="p-1 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors" 
+                          title="Edit"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                        </button>
+                        <button 
+                          onClick={() => handleCopy(msg.text)}
+                          className="p-1 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors" 
+                          title="Copy"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     )}
                   </div>
