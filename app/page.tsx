@@ -48,6 +48,7 @@ import {
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { motion, AnimatePresence } from 'motion/react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
@@ -315,6 +316,15 @@ export default function Chris() {
 
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
+  const [hasNewMessages, setHasNewMessages] = useState(false);
+  const [activeContextMenuId, setActiveContextMenuId] = useState<string | null>(null);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editInput, setEditInput] = useState('');
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
@@ -560,9 +570,91 @@ export default function Chris() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // --- Auto-scroll ---
+  // --- Context Menu Logic ---
+  const handleTouchStart = (msgId: string) => {
+    longPressTimer.current = setTimeout(() => {
+      setActiveContextMenuId(msgId);
+      if (window.navigator.vibrate) {
+        window.navigator.vibrate(50);
+      }
+    }, 500); // 500ms for long press
+  };
+
+  const handleTouchEnd = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
+  const handleShare = async (text: string) => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          text: text,
+          title: 'Shared Message from Chris'
+        });
+      } catch (error) {
+        console.error('Error sharing:', error);
+      }
+    } else {
+      addToast('Sharing not supported on this browser', 'info');
+    }
+  };
+
+  // Close context menu on any click
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const handleClick = () => setActiveContextMenuId(null);
+    window.addEventListener('click', handleClick);
+    return () => window.removeEventListener('click', handleClick);
+  }, []);
+
+  // --- Auto-scroll & Scroll Tracking ---
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
+  };
+
+  // Handle scroll events to detect if user is at bottom or scrolling up
+  const handleScroll = () => {
+    if (!scrollContainerRef.current) return;
+    
+    const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
+    const isBottom = scrollHeight - scrollTop - clientHeight < 100; // 100px threshold
+    
+    setIsAtBottom(isBottom);
+    
+    if (isBottom) {
+      setAutoScrollEnabled(true);
+      setHasNewMessages(false);
+    } else {
+      // If user scrolls up significantly, disable auto-scroll
+      // We only disable if they are not at the bottom
+      setAutoScrollEnabled(false);
+    }
+  };
+
+  // ResizeObserver to follow content growth (like typewriter effect)
+  useEffect(() => {
+    if (!messagesContainerRef.current) return;
+
+    const observer = new ResizeObserver(() => {
+      if (autoScrollEnabled) {
+        scrollToBottom('auto'); // Use 'auto' for immediate follow during typing
+      } else {
+        // If not at bottom and content grows (new message or typing), show indicator
+        setHasNewMessages(true);
+      }
+    });
+
+    observer.observe(messagesContainerRef.current);
+    return () => observer.disconnect();
+  }, [autoScrollEnabled]);
+
+  // Initial scroll on messages change
+  useEffect(() => {
+    if (autoScrollEnabled) {
+      scrollToBottom('smooth');
+    }
   }, [messages, isGenerating]);
 
   // --- Auto-resize Textarea ---
@@ -701,28 +793,30 @@ export default function Chris() {
     return new GoogleGenAI({ apiKey });
   };
 
-  const handleError = (error: any) => {
+  const handleError = (error: any): string => {
     const msg = error?.message || error?.toString() || '';
     const lowerMsg = msg.toLowerCase();
     
     if (lowerMsg.includes('veo_api_key_required')) {
-      return; // Handled by the modal
+      return ''; // Handled by the modal
     }
     
+    let errorText = '';
     if (lowerMsg.includes('413') || lowerMsg.includes('payload too large')) {
-      addToast('Payload Too Large: The request exceeds server size limits.', 'error');
+      errorText = 'Payload Too Large: The request exceeds server size limits.';
     } else if (lowerMsg.includes('quota') || lowerMsg.includes('exhausted') || lowerMsg.includes('429 resource has been exhausted')) {
-      addToast('Quota Exceeded: You have reached the API limit for this model. Please try again later or switch to a different model.', 'quota');
+      errorText = 'Quota Exceeded: You have reached the API limit for this model. Please try again later or switch to a different model.';
     } else if (lowerMsg.includes('429') || lowerMsg.includes('rate limit') || lowerMsg.includes('too many requests')) {
-      addToast('Rate Limit Exceeded: Too many requests. Please wait a moment.', 'warning');
+      errorText = 'Rate Limit Exceeded: Too many requests. Please wait a moment.';
     } else if (lowerMsg.includes('400') || lowerMsg.includes('invalid') || lowerMsg.includes('context length')) {
-      addToast('Context Length Exceeded: Prompt is too long for model capacity.', 'error');
+      errorText = 'Context Length Exceeded: Prompt is too long for model capacity.';
     } else if (lowerMsg.includes('404') || lowerMsg.includes('not found')) {
-      addToast('Model Not Found: The selected AI model is currently unavailable.', 'error');
+      errorText = 'Model Not Found: The selected AI model is currently unavailable.';
     } else {
-      addToast(`Error: ${msg.slice(0, 100)}${msg.length > 100 ? '...' : ''} Please try again.`, 'error');
+      errorText = `Error: ${msg.slice(0, 100)}${msg.length > 100 ? '...' : ''} Please try again.`;
     }
-    console.error('API Error:', error); // Log the full error for debugging, but don't show it to the user
+    console.error('API Error:', error); // Log the full error for debugging
+    return errorText;
   };
 
   const enhancePrompt = async () => {
@@ -798,6 +892,7 @@ export default function Chris() {
     };
 
     setMessages((prev) => [...prev, newUserMessage]);
+    setAutoScrollEnabled(true);
     setIsGenerating(true);
     setIsWaiting(true);
 
@@ -1022,6 +1117,15 @@ export default function Chris() {
                 });
                 
                 response = finalResponse;
+
+                // Fallback: If the model returns empty text after search, construct a response from the search results
+                if (!response.text && searchData && searchData.results && searchData.results.length > 0) {
+                   const searchSummary = searchData.results.map((r: any) => `**${r.title}**\n${r.snippet}\n[Link](${r.link})`).join('\n\n');
+                   response = {
+                     ...response,
+                     text: `Here are the search results for "${query}":\n\n${searchSummary}`
+                   };
+                }
               } catch (err) {
                 console.error("Web search failed:", err);
                 // Fallback or let the original response stand (which is just the function call)
@@ -1086,9 +1190,9 @@ export default function Chris() {
       const finishReason = candidate?.finishReason;
 
       if (finishReason === 'MAX_TOKENS') {
-        addToast('Token Limit Reached: Response was truncated due to length restriction.', 'warning');
+        response.text += '\n\n[Response truncated due to length restriction]';
       } else if (finishReason === 'SAFETY') {
-        addToast('Incomplete Generation: Response stopped due to safety constraints.', 'warning');
+        response.text += '\n\n[Response stopped due to safety constraints]';
       }
 
       let aiMessage: Message;
@@ -1187,14 +1291,9 @@ export default function Chris() {
       }
 
     } catch (error: any) {
-      const msg = error?.message || error?.toString() || '';
-      if (msg.toLowerCase().includes('429') || msg.toLowerCase().includes('quota')) {
-        addToast('The AI is currently experiencing high traffic. Please try again in a few seconds.', 'error');
-        setMessages((prev) => [...prev, { id: Date.now().toString(), role: 'ai', text: 'I am currently receiving too many requests. Please wait a moment and try again.', isError: true }]);
-      } else {
-        handleError(error);
-        setMessages((prev) => [...prev, { id: Date.now().toString(), role: 'ai', text: 'Failed to generate response.', isError: true }]);
-      }
+      const errorMsg = handleError(error);
+      const fallbackText = errorMsg || 'I encountered an error while processing your request.';
+      setMessages((prev) => [...prev, { id: Date.now().toString(), role: 'ai', text: fallbackText }]);
     } finally {
       setIsGenerating(false);
       setIsWaiting(false);
@@ -1301,16 +1400,34 @@ export default function Chris() {
 
   const handleEditUserMessage = (msgId: string) => {
     setHoveredMessageId(null);
+    const msg = messages.find(m => m.id === msgId);
+    if (!msg) return;
+
+    setEditingMessageId(msgId);
+    setEditInput(msg.text);
+  };
+
+  const handleSaveEdit = async (msgId: string) => {
+    if (!editInput.trim()) return;
+    
     const msgIndex = messages.findIndex(m => m.id === msgId);
     if (msgIndex === -1) return;
 
-    const msg = messages[msgIndex];
-    setInput(msg.text);
-    // Remove this message and all subsequent messages
-    setMessages(prev => prev.slice(0, msgIndex));
-    if (textareaRef.current) {
-      textareaRef.current.focus();
-    }
+    // Update the message and remove all subsequent messages (since context changed)
+    const updatedMessages = messages.slice(0, msgIndex);
+    const editedMsg = { ...messages[msgIndex], text: editInput.trim() };
+    
+    setMessages([...updatedMessages, editedMsg]);
+    setEditingMessageId(null);
+    setEditInput('');
+    
+    // Trigger submit with the new text to get a fresh AI response
+    handleSubmit(undefined, editInput.trim());
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMessageId(null);
+    setEditInput('');
   };
 
   const handleReadAloud = async (text: string, msgId: string) => {
@@ -1845,7 +1962,7 @@ export default function Chris() {
         ) : (
           <>
             {/* Chat Feed */}
-        <div className="flex-1 overflow-y-auto premium-scrollbar">
+        <div ref={scrollContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto premium-scrollbar relative">
           {/* Header */}
           <header className="sticky top-0 left-0 right-0 h-12 md:h-14 bg-white/80 dark:bg-[#000000]/80 backdrop-blur-xl z-30 flex items-center justify-between px-3 md:px-5">
             <div className="flex items-center gap-2">
@@ -1902,29 +2019,21 @@ export default function Chris() {
                 <Mirage size="60" speed="2.5" color="currentColor" />
               </div>
             ) : (
-              <div className="max-w-3xl mx-auto w-full flex flex-col gap-6 md:gap-8">
+              <>
+              <div ref={messagesContainerRef} className="max-w-3xl mx-auto w-full flex flex-col gap-6 md:gap-8">
                 {messages.map((msg, index) => {
-                  const isHovered = hoveredMessageId === msg.id;
-                  const hoveredMessageExists = messages.some(m => m.id === hoveredMessageId);
-                  
-                  const isRelated = (() => {
-                    if (!hoveredMessageId || !hoveredMessageExists) return false;
-                    const hoveredIndex = messages.findIndex(m => m.id === hoveredMessageId);
-                    if (hoveredIndex === -1) return false;
-                    const hoveredMsg = messages[hoveredIndex];
-                    if (hoveredMsg.role === 'ai' && index === hoveredIndex - 1) return true;
-                    if (hoveredMsg.role === 'user' && index === hoveredIndex + 1) return true;
-                    return false;
-                  })();
-                  
-                  const opacityClass = hoveredMessageId && hoveredMessageExists && !isHovered && !isRelated ? 'opacity-30 blur-[1px]' : 'opacity-100';
-
                   return (
                     <div 
                       key={msg.id} 
-                      className={`flex flex-col group ${msg.role === 'user' ? 'items-end' : 'items-start'} ${opacityClass} transition-all duration-300 ease-in-out`}
-                      onMouseEnter={() => setHoveredMessageId(msg.id)}
-                      onMouseLeave={() => setHoveredMessageId(null)}
+                      className={`flex flex-col group relative ${msg.role === 'user' ? 'items-end' : 'items-start'} transition-all duration-300 ease-in-out`}
+                      onTouchStart={() => msg.role === 'user' ? handleTouchStart(msg.id) : null}
+                      onTouchEnd={handleTouchEnd}
+                      onContextMenu={(e) => {
+                        if (msg.role === 'user') {
+                          e.preventDefault();
+                          setActiveContextMenuId(msg.id);
+                        }
+                      }}
                     >
                   <div
                     className={`max-w-[92%] md:max-w-[85%] px-4 py-3 md:px-5 md:py-3.5 ${
@@ -1977,36 +2086,69 @@ export default function Chris() {
                       </div>
                     )}
 
-                    {msg.role === 'ai' && msg.shouldAnimate ? (
-                      <TypewriterMessage 
-                        text={msg.text} 
-                        onComplete={() => {
-                          setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, shouldAnimate: false } : m));
-                        }}
-                      />
-                    ) : (
-                      <div className="prose prose-invert max-w-none prose-p:leading-relaxed prose-pre:p-0 prose-pre:bg-transparent prose-pre:border-0 text-[14px] sm:text-[15px] tracking-wide">
-                        <Markdown
-                          remarkPlugins={[remarkGfm]}
-                          components={{
-                            code: CodeBlock,
-                            p: ({ children }) => <p className="mb-4 last:mb-0">{children}</p>,
-                            ul: ({ children }) => <ul className="list-disc pl-6 mb-4 space-y-2">{children}</ul>,
-                            ol: ({ children }) => <ol className="list-decimal pl-6 mb-4 space-y-2">{children}</ol>,
-                            li: ({ children }) => <li className="pl-1">{children}</li>,
-                            h1: ({ children }) => <h1 className="text-2xl font-bold mb-4 mt-6 text-black dark:text-white">{children}</h1>,
-                            h2: ({ children }) => <h2 className="text-xl font-bold mb-4 mt-6 text-black dark:text-white">{children}</h2>,
-                            h3: ({ children }) => <h3 className="text-lg font-bold mb-3 mt-5 text-black dark:text-white">{children}</h3>,
-                            blockquote: ({ children }) => <blockquote className="border-l-4 border-black/20 dark:border-white/20 pl-4 italic text-black/70 dark:text-white/70 my-4">{children}</blockquote>,
-                            a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 underline underline-offset-2 decoration-blue-400/30 hover:decoration-blue-400 transition-colors">{children}</a>,
-                            table: ({ children }) => <div className="overflow-x-auto my-6"><table className="w-full text-left border-collapse">{children}</table></div>,
-                            th: ({ children }) => <th className="border-b border-black/10 dark:border-white/10 px-4 py-3 font-medium text-black/90 dark:text-white/90 bg-black/5 dark:bg-white/5">{children}</th>,
-                            td: ({ children }) => <td className="border-b border-black/5 dark:border-white/5 px-4 py-3 text-black/70 dark:text-white/70">{children}</td>,
+                    {editingMessageId === msg.id ? (
+                      <div className="flex flex-col gap-3 w-full min-w-[300px] md:min-w-[500px]">
+                        <textarea
+                          value={editInput}
+                          onChange={(e) => setEditInput(e.target.value)}
+                          className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-xl p-3 text-[14px] sm:text-[15px] focus:outline-none focus:ring-2 focus:ring-blue-500/50 min-h-[100px] resize-none text-black dark:text-white"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              handleSaveEdit(msg.id);
+                            } else if (e.key === 'Escape') {
+                              handleCancelEdit();
+                            }
                           }}
-                        >
-                          {msg.text}
-                        </Markdown>
+                        />
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={handleCancelEdit}
+                            className="px-4 py-1.5 text-sm font-medium text-black/60 dark:text-white/60 hover:text-black dark:hover:text-white transition-colors"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={() => handleSaveEdit(msg.id)}
+                            className="px-4 py-1.5 text-sm font-medium bg-black dark:bg-white text-white dark:text-black rounded-full hover:opacity-90 transition-opacity"
+                          >
+                            Save & Submit
+                          </button>
+                        </div>
                       </div>
+                    ) : (
+                      msg.role === 'ai' && msg.shouldAnimate ? (
+                        <TypewriterMessage 
+                          text={msg.text} 
+                          onComplete={() => {
+                            setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, shouldAnimate: false } : m));
+                          }}
+                        />
+                      ) : (
+                        <div className="prose prose-invert max-w-none prose-p:leading-relaxed prose-pre:p-0 prose-pre:bg-transparent prose-pre:border-0 text-[14px] sm:text-[15px] tracking-wide">
+                          <Markdown
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                              code: CodeBlock,
+                              p: ({ children }) => <p className="mb-4 last:mb-0">{children}</p>,
+                              ul: ({ children }) => <ul className="list-disc pl-6 mb-4 space-y-2">{children}</ul>,
+                              ol: ({ children }) => <ol className="list-decimal pl-6 mb-4 space-y-2">{children}</ol>,
+                              li: ({ children }) => <li className="pl-1">{children}</li>,
+                              h1: ({ children }) => <h1 className="text-2xl font-bold mb-4 mt-6 text-black dark:text-white">{children}</h1>,
+                              h2: ({ children }) => <h2 className="text-xl font-bold mb-4 mt-6 text-black dark:text-white">{children}</h2>,
+                              h3: ({ children }) => <h3 className="text-lg font-bold mb-3 mt-5 text-black dark:text-white">{children}</h3>,
+                              blockquote: ({ children }) => <blockquote className="border-l-4 border-black/20 dark:border-white/20 pl-4 italic text-black/70 dark:text-white/70 my-4">{children}</blockquote>,
+                              a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 underline underline-offset-2 decoration-blue-400/30 hover:decoration-blue-400 transition-colors">{children}</a>,
+                              table: ({ children }) => <div className="overflow-x-auto my-6"><table className="w-full text-left border-collapse">{children}</table></div>,
+                              th: ({ children }) => <th className="border-b border-black/10 dark:border-white/10 px-4 py-3 font-medium text-black/90 dark:text-white/90 bg-black/5 dark:bg-white/5">{children}</th>,
+                              td: ({ children }) => <td className="border-b border-black/5 dark:border-white/5 px-4 py-3 text-black/70 dark:text-white/70">{children}</td>,
+                            }}
+                          >
+                            {msg.text}
+                          </Markdown>
+                        </div>
+                      )
                     )}
 
                     {msg.mapLocation && (
@@ -2147,8 +2289,8 @@ export default function Chris() {
                       </div>
                     )}
 
-                    {msg.role === 'user' && (
-                      <div className="flex items-center justify-end gap-1 mt-2 text-black/40 dark:text-white/40 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {msg.role === 'user' && editingMessageId !== msg.id && (
+                      <div className="flex items-center justify-end gap-1 mt-2 text-black/40 dark:text-white/40 md:opacity-100 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button 
                           onClick={() => handleEditUserMessage(msg.id)}
                           className="p-1 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors" 
@@ -2163,8 +2305,64 @@ export default function Chris() {
                         >
                           <Copy className="w-3.5 h-3.5" />
                         </button>
+                        <button 
+                          onClick={() => handleShare(msg.text)}
+                          className="p-1 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors" 
+                          title="Share"
+                        >
+                          <Share className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     )}
+
+                    {/* Mobile Context Menu */}
+                    <AnimatePresence>
+                      {activeContextMenuId === msg.id && editingMessageId !== msg.id && (
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                          animate={{ opacity: 1, scale: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.9, y: 10 }}
+                          className="absolute bottom-full right-0 mb-2 z-[60] w-64 bg-[#1c1c1c] dark:bg-[#1c1c1c] rounded-2xl shadow-2xl overflow-hidden border border-white/10 p-4 flex flex-col gap-1"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="text-white/40 text-xs font-medium mb-4 px-2">
+                            {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                          
+                          <button 
+                            onClick={() => { handleCopy(msg.text); setActiveContextMenuId(null); }}
+                            className="flex items-center gap-4 w-full p-3 text-white hover:bg-white/5 rounded-xl transition-colors text-left"
+                          >
+                            <Copy className="w-5 h-5" />
+                            <span className="font-medium">Copy</span>
+                          </button>
+                          
+                          <button 
+                            onClick={() => { handleCopy(msg.text); addToast('Text selected', 'info'); setActiveContextMenuId(null); }}
+                            className="flex items-center gap-4 w-full p-3 text-white hover:bg-white/5 rounded-xl transition-colors text-left"
+                          >
+                            <FileText className="w-5 h-5" />
+                            <span className="font-medium">Select Text</span>
+                          </button>
+                          
+                          <button 
+                            onClick={() => { handleEditUserMessage(msg.id); setActiveContextMenuId(null); }}
+                            className="flex items-center gap-4 w-full p-3 text-white hover:bg-white/5 rounded-xl transition-colors text-left"
+                          >
+                            <Edit className="w-5 h-5" />
+                            <span className="font-medium">Edit Message</span>
+                          </button>
+                          
+                          <button 
+                            onClick={() => { handleShare(msg.text); setActiveContextMenuId(null); }}
+                            className="flex items-center gap-4 w-full p-3 text-white hover:bg-white/5 rounded-xl transition-colors text-left"
+                          >
+                            <Share className="w-5 h-5" />
+                            <span className="font-medium">Share</span>
+                          </button>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                     </div>
                   );
@@ -2176,6 +2374,21 @@ export default function Chris() {
             )}
             <div ref={messagesEndRef} />
           </div>
+
+          {/* Scroll to Bottom Button */}
+          {!isAtBottom && (
+            <button
+              onClick={() => scrollToBottom('smooth')}
+              className="fixed bottom-32 right-6 md:right-10 z-40 p-2.5 bg-white dark:bg-[#1a1a1a] border border-black/10 dark:border-white/10 rounded-full shadow-lg hover:bg-neutral-50 dark:hover:bg-[#222] transition-all animate-in fade-in slide-in-from-bottom-4 duration-300 group"
+              title="Scroll to bottom"
+            >
+              <ChevronDown className="w-5 h-5 text-black/70 dark:text-white/70 group-hover:text-black dark:group-hover:text-white" />
+              {hasNewMessages && (
+                <span className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border-2 border-white dark:border-[#1a1a1a]" />
+              )}
+            </button>
+          )}
+          </>
         )}
         </div>
         </div>
