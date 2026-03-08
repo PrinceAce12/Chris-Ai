@@ -846,7 +846,7 @@ export default function Chris() {
       config.tools = config.tools || [];
       config.tools.push({ functionDeclarations: [trackLocationFunctionDeclaration] });
 
-      if (isDeepSearchMode) {
+      if (isDeepSearchMode || /^(search|find|lookup|google|what is|who is|define)/i.test(userText)) {
         config.tools.push({ googleSearch: {} });
       }
       if (isMapsMode) {
@@ -1032,8 +1032,12 @@ export default function Chris() {
       let aiMessage: Message;
 
       let aiText = response.text || '';
-      if (!aiText && response.functionCalls?.some((c: any) => c.name === 'trackLocation')) {
-        aiText = "I've enabled location tracking for you. How can I help with your location?";
+      if (!aiText) {
+        if (response.functionCalls?.some((c: any) => c.name === 'trackLocation')) {
+          aiText = "I've enabled location tracking for you. How can I help with your location?";
+        } else if (candidate?.groundingMetadata?.groundingChunks?.length > 0) {
+          aiText = "Here is what I found:";
+        }
       }
 
       if (isImageResponse) {
@@ -1216,6 +1220,7 @@ export default function Chris() {
 
 
   const handleRegenerate = (msgId: string) => {
+    setHoveredMessageId(null);
     const msgIndex = messages.findIndex(m => m.id === msgId);
     if (msgIndex === -1) return;
 
@@ -1233,6 +1238,7 @@ export default function Chris() {
   };
 
   const handleEditUserMessage = (msgId: string) => {
+    setHoveredMessageId(null);
     const msgIndex = messages.findIndex(m => m.id === msgId);
     if (msgIndex === -1) return;
 
@@ -1837,8 +1843,10 @@ export default function Chris() {
               <div className="max-w-3xl mx-auto w-full flex flex-col gap-6 md:gap-8">
                 {messages.map((msg, index) => {
                   const isHovered = hoveredMessageId === msg.id;
+                  const hoveredMessageExists = messages.some(m => m.id === hoveredMessageId);
+                  
                   const isRelated = (() => {
-                    if (!hoveredMessageId) return false;
+                    if (!hoveredMessageId || !hoveredMessageExists) return false;
                     const hoveredIndex = messages.findIndex(m => m.id === hoveredMessageId);
                     if (hoveredIndex === -1) return false;
                     const hoveredMsg = messages[hoveredIndex];
@@ -1847,7 +1855,7 @@ export default function Chris() {
                     return false;
                   })();
                   
-                  const opacityClass = hoveredMessageId && !isHovered && !isRelated ? 'opacity-30 blur-[1px]' : 'opacity-100';
+                  const opacityClass = hoveredMessageId && hoveredMessageExists && !isHovered && !isRelated ? 'opacity-30 blur-[1px]' : 'opacity-100';
 
                   return (
                     <div 
@@ -2022,7 +2030,7 @@ export default function Chris() {
                         )}
                       </div>
                     )}
-                    {msg.role === 'ai' && !msg.shouldAnimate && (
+                    {msg.role === 'ai' && !msg.shouldAnimate && msg.text && (
                       <div className="flex flex-col gap-3 mt-3 w-full">
                         <div className="flex items-center gap-1 text-black/40 dark:text-white/40">
                           <button 
@@ -2074,7 +2082,6 @@ export default function Chris() {
                           <span className="text-[10px] opacity-50">Fast</span>
                         </div>
                         
-
                       </div>
                     )}
 
