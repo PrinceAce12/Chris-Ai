@@ -1600,7 +1600,8 @@ export default function Chris() {
     );
   }
 
-  const isLandingPage = messages.length === 0 && !isLoadingChat;
+  // Only show landing page if we are at root (no chatId), have no messages, and aren't loading
+  const isLandingPage = !urlChatId && messages.length === 0 && !isLoadingChat;
 
   return (
     <div className="flex h-[100dvh] w-full bg-white dark:bg-[#050505] text-black dark:text-white font-sans overflow-hidden selection:bg-black/20 dark:selection:bg-white/20">
