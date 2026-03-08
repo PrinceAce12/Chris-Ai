@@ -1047,7 +1047,15 @@ export default function Chris() {
             // Only add the tool if we are not using maps mode, as maps mode restricts other tools
             if (!isMapsMode && status === "authenticated") {
               currentConfig.tools = currentConfig.tools || [];
-              currentConfig.tools.push({ functionDeclarations: [generateImageFunctionDeclaration, webSearchFunctionDeclaration] });
+              const toolsToAdd = [generateImageFunctionDeclaration];
+              
+              // Only add webSearch if explicitly requested or in deep search mode
+              // This prevents the model from searching on simple greetings like "Hi"
+              if (isDeepSearchMode || /^(search|find|lookup|google|what is|who is|define|current|latest|news|check)/i.test(userText)) {
+                toolsToAdd.push(webSearchFunctionDeclaration);
+              }
+              
+              currentConfig.tools.push({ functionDeclarations: toolsToAdd });
             }
             
             if (currentConfig.tools && currentConfig.tools.length === 0) {
@@ -1086,50 +1094,60 @@ export default function Chris() {
                 const searchRes = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
                 const searchData = await searchRes.json();
                 
-                // Construct the tool response
-                const toolResponse = {
-                  functionResponses: [
-                    {
-                      name: 'webSearch',
-                      response: { result: searchData }
-                    }
-                  ]
-                };
-
-                // Call the model again with the search results
-                // We need to append the model's function call and the tool response to the history
-                const newContents = [
-                  ...contents,
-                  {
-                    role: 'model',
-                    parts: [{ functionCall: call }]
-                  },
-                  {
-                    role: 'function',
-                    parts: [{ functionResponse: { name: 'webSearch', response: { result: searchData } } }]
-                  }
-                ];
-
-                const finalResponse = await ai.models.generateContent({
-                  model: currentModelName,
-                  contents: newContents as any,
-                  config: { ...currentConfig, tools: [] } // Disable tools for the final response to prevent loops
-                });
-                
-                response = finalResponse;
-
-                // Fallback: If the model returns empty text after search, construct a response from the search results
-                if (!response.text && searchData && searchData.results && searchData.results.length > 0) {
-                   const searchSummary = searchData.results.map((r: any) => `**${r.title}**\n${r.snippet}\n[Link](${r.link})`).join('\n\n');
+                if (!searchData.results || searchData.results.length === 0) {
                    response = {
                      ...response,
-                     text: `Here are the search results for "${query}":\n\n${searchSummary}`
+                     text: `I searched for "${query}" but couldn't find any relevant results.`
                    };
+                } else {
+                  // Construct the tool response
+                  const toolResponse = {
+                    functionResponses: [
+                      {
+                        name: 'webSearch',
+                        response: { result: searchData }
+                      }
+                    ]
+                  };
+  
+                  // Call the model again with the search results
+                  // We need to append the model's function call and the tool response to the history
+                  const newContents = [
+                    ...contents,
+                    {
+                      role: 'model',
+                      parts: [{ functionCall: call }]
+                    },
+                    {
+                      role: 'function',
+                      parts: [{ functionResponse: { name: 'webSearch', response: { result: searchData } } }]
+                    }
+                  ];
+  
+                  const finalResponse = await ai.models.generateContent({
+                    model: currentModelName,
+                    contents: newContents as any,
+                    config: { ...currentConfig, tools: [] } // Disable tools for the final response to prevent loops
+                  });
+                  
+                  response = finalResponse;
+  
+                  // Fallback: If the model returns empty text after search, construct a response from the search results
+                  if (!response.text && searchData && searchData.results && searchData.results.length > 0) {
+                     const searchSummary = searchData.results.map((r: any) => `**${r.title}**\n${r.snippet}\n[Link](${r.link})`).join('\n\n');
+                     response = {
+                       ...response,
+                       text: `Here are the search results for "${query}":\n\n${searchSummary}`
+                     };
+                  }
                 }
               } catch (err) {
                 console.error("Web search failed:", err);
-                // Fallback or let the original response stand (which is just the function call)
-                // Ideally we should tell the model it failed
+                // Provide a user-friendly error message instead of failing silently
+                response = {
+                  ...response,
+                  text: "I encountered an error while trying to search the web. Please try again later."
+                };
               }
             }
           }
