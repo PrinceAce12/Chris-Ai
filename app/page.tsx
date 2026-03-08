@@ -2,8 +2,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI, Type, ThinkingLevel, FunctionDeclaration } from '@google/genai';
-import { Mirage } from 'ldrs/react'
-import 'ldrs/react/Mirage.css'
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -1181,7 +1179,9 @@ export default function Chris() {
   if (status === "loading") {
     return (
       <div className="flex h-[100dvh] w-full items-center justify-center bg-white dark:bg-[#000000] text-black dark:text-white">
-        <Mirage size="60" speed="2.5" color="currentColor" />
+        <div className="animate-pulse">
+          <PlanetLogo className="w-16 h-16" />
+        </div>
       </div>
     );
   }
@@ -1314,7 +1314,9 @@ export default function Chris() {
               <div className="w-[180px]">
                 {isLoadingHistory ? (
                   <div className="flex justify-center py-4 text-black dark:text-white">
-                    <Mirage size="30" speed="2.5" color="currentColor" />
+                    <div className="animate-pulse">
+                      <PlanetLogo className="w-8 h-8" />
+                    </div>
                   </div>
                 ) : chatHistory.length === 0 ? (
                   <p className="text-[11px] text-black/40 dark:text-white/40 italic">No history yet</p>
@@ -1853,11 +1855,9 @@ export default function Chris() {
               ))}
             {isWaiting && (
               <div className="flex items-start justify-start w-full py-8 px-4 md:px-5 text-black dark:text-white">
-                <Mirage
-                  size="60"
-                  speed="2.5"
-                  color="currentColor" 
-                />
+                <div className="animate-pulse">
+                  <PlanetLogo className="w-12 h-12" />
+                </div>
               </div>
             )}
             <div ref={messagesEndRef} />

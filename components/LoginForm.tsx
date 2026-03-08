@@ -3,8 +3,6 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { PlanetLogo } from "@/components/PlanetLogo"
-import { Mirage } from 'ldrs/react'
-import 'ldrs/react/Mirage.css'
 import Link from "next/link"
 
 import { auth, db } from "@/lib/firebase"
@@ -68,7 +66,11 @@ export function LoginForm() {
           disabled={isLoading}
           className="w-full py-3 px-4 rounded-2xl bg-white dark:bg-[#111] border border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5 transition-all font-bold flex items-center justify-center gap-3 disabled:opacity-50"
         >
-          {isLoading ? <Mirage size="20" speed="2.5" color="currentColor" /> : (
+          {isLoading ? (
+            <div className="animate-pulse">
+              <PlanetLogo className="w-5 h-5" />
+            </div>
+          ) : (
             <svg className="w-5 h-5" viewBox="0 0 24 24">
               <path
                 fill="currentColor"
