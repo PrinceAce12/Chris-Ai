@@ -165,6 +165,8 @@ interface Toast {
 }
 
 import { PlanetLogo } from '@/components/PlanetLogo';
+import { Mirage } from 'ldrs/react';
+import 'ldrs/react/Mirage.css';
 import { ThemeToggle } from '@/components/theme-toggle';
 
 // --- Components ---
@@ -1865,9 +1867,7 @@ export default function Chris() {
               ))}
             {isWaiting && (
               <div className="flex items-start justify-start w-full py-8 px-4 md:px-5 text-black dark:text-white">
-                <div className="animate-pulse">
-                  <PlanetLogo className="w-12 h-12" />
-                </div>
+                <Mirage size="40" speed="2.5" color="currentColor" />
               </div>
             )}
             <div ref={messagesEndRef} />
