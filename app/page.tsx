@@ -847,7 +847,8 @@ export default function Chris() {
       config.tools.push({ functionDeclarations: [trackLocationFunctionDeclaration] });
 
       if (isDeepSearchMode || /^(search|find|lookup|google|what is|who is|define)/i.test(userText)) {
-        config.tools.push({ googleSearch: {} });
+        // We use our custom webSearch tool instead of googleSearch for broader compatibility
+        // config.tools.push({ googleSearch: {} }); 
       }
       if (isMapsMode) {
         config.tools.push({ googleMaps: {} });
@@ -896,6 +897,8 @@ export default function Chris() {
             break;
           }
 
+          let currentConfig = { ...config };
+
           if (isImagineMode) {
             // Use gemini-2.5-flash-image for image editing or generation
             const imagineParts: any[] = [];
@@ -916,6 +919,21 @@ export default function Chris() {
               contents: { parts: imagineParts }
             });
           } else {
+            const webSearchFunctionDeclaration: FunctionDeclaration = {
+              name: "webSearch",
+              description: "Search the web for information. Use this tool when the user asks to search, find, lookup, or google something, or asks about current events or facts.",
+              parameters: {
+                type: Type.OBJECT,
+                properties: {
+                  query: {
+                    type: Type.STRING,
+                    description: "The search query.",
+                  },
+                },
+                required: ["query"],
+              },
+            };
+
             const generateImageFunctionDeclaration: FunctionDeclaration = {
               name: "generateImage",
               description: "Generate an image based on a text prompt. Use this tool when the user asks to create, generate, or draw an image or picture.",
@@ -931,11 +949,10 @@ export default function Chris() {
               },
             };
 
-            const currentConfig = { ...config };
             // Only add the tool if we are not using maps mode, as maps mode restricts other tools
             if (!isMapsMode && status === "authenticated") {
               currentConfig.tools = currentConfig.tools || [];
-              currentConfig.tools.push({ functionDeclarations: [generateImageFunctionDeclaration] });
+              currentConfig.tools.push({ functionDeclarations: [generateImageFunctionDeclaration, webSearchFunctionDeclaration] });
             }
             
             if (currentConfig.tools && currentConfig.tools.length === 0) {
@@ -954,6 +971,7 @@ export default function Chris() {
           
           if (functionCalls && functionCalls.length > 0) {
             const call = functionCalls[0];
+            
             if (call.name === 'generateImage') {
               const prompt = call.args?.prompt as string;
               
@@ -965,6 +983,50 @@ export default function Chris() {
               
               response = imageResponse;
               isImageResponse = true;
+            } else if (call.name === 'webSearch') {
+              const query = call.args?.query as string;
+              
+              // Perform the web search via our API route
+              try {
+                const searchRes = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+                const searchData = await searchRes.json();
+                
+                // Construct the tool response
+                const toolResponse = {
+                  functionResponses: [
+                    {
+                      name: 'webSearch',
+                      response: { result: searchData }
+                    }
+                  ]
+                };
+
+                // Call the model again with the search results
+                // We need to append the model's function call and the tool response to the history
+                const newContents = [
+                  ...contents,
+                  {
+                    role: 'model',
+                    parts: [{ functionCall: call }]
+                  },
+                  {
+                    role: 'function',
+                    parts: [{ functionResponse: { name: 'webSearch', response: { result: searchData } } }]
+                  }
+                ];
+
+                const finalResponse = await ai.models.generateContent({
+                  model: currentModelName,
+                  contents: newContents as any,
+                  config: { ...currentConfig, tools: [] } // Disable tools for the final response to prevent loops
+                });
+                
+                response = finalResponse;
+              } catch (err) {
+                console.error("Web search failed:", err);
+                // Fallback or let the original response stand (which is just the function call)
+                // Ideally we should tell the model it failed
+              }
             }
           }
 
