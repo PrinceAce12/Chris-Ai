@@ -1195,7 +1195,7 @@ export default function Chris() {
 
 
       {/* Mobile Sidebar Overlay */}
-      {isSidebarOpen && (
+      {isSidebarOpen && status === "authenticated" && (
         <div 
           className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30 md:hidden animate-in fade-in duration-300"
           onClick={() => setIsSidebarOpen(false)}
@@ -1203,12 +1203,12 @@ export default function Chris() {
       )}
 
       {/* Sidebar */}
-      <div
-        className={`fixed md:relative z-40 h-full flex-shrink-0 transition-all duration-300 ease-in-out border-r border-black/5 dark:border-white/5 bg-neutral-50 dark:bg-[#000000] flex flex-col py-2
-          ${isSidebarOpen ? 'translate-x-0 w-[240px]' : '-translate-x-full md:translate-x-0 w-[240px] md:w-[56px]'}
-          ${status === "unauthenticated" ? 'hidden' : ''}
-        `}
-      >
+      {status === "authenticated" && (
+        <div
+          className={`fixed md:relative z-40 h-full flex-shrink-0 transition-all duration-300 ease-in-out border-r border-black/5 dark:border-white/5 bg-neutral-50 dark:bg-[#000000] flex flex-col py-2
+            ${isSidebarOpen ? 'translate-x-0 w-[240px]' : '-translate-x-full md:translate-x-0 w-[240px] md:w-[56px]'}
+          `}
+        >
         <div className="flex flex-col h-full w-full overflow-hidden">
           {/* Top Section */}
           <div className="flex items-center mb-2 h-9 shrink-0 pl-2">
@@ -1228,7 +1228,7 @@ export default function Chris() {
           {/* Nav Items */}
           <div className="flex flex-col gap-1 mb-2 shrink-0">
             {/* Search */}
-            {status === "authenticated" && user?.email === 'johnkerveelayese@gmail.com' && (
+            {user?.email === 'johnkerveelayese@gmail.com' && (
               <button className={`group flex items-center rounded-xl transition-all duration-300 h-9 ${isSidebarOpen ? 'bg-black/5 dark:bg-[#1a1a1a] hover:bg-black/10 dark:hover:bg-[#222] w-[calc(100%-16px)]' : 'hover:bg-black/5 dark:hover:bg-white/10 w-[40px]'} mx-2`}>
                 <div className="w-[40px] h-full flex items-center justify-center shrink-0">
                   <Search className={`w-[18px] h-[18px] shrink-0 ${isSidebarOpen ? 'text-black/70 dark:text-white/70 group-hover:text-black dark:group-hover:text-white' : 'text-black/70 dark:text-white/70'} transition-colors`} strokeWidth={2} />
@@ -1252,19 +1252,17 @@ export default function Chris() {
             </button>
 
             {/* Voice */}
-            {status === "authenticated" && (
-              <button className={`group flex items-center rounded-xl transition-all duration-300 h-9 ${isSidebarOpen ? 'hover:bg-black/5 dark:hover:bg-white/5 w-[calc(100%-16px)]' : 'hover:bg-black/5 dark:hover:bg-white/10 w-[40px]'} mx-2`}>
-                <div className="w-[40px] h-full flex items-center justify-center shrink-0">
-                  <AudioLines className="w-[18px] h-[18px] text-black/70 dark:text-white/70 group-hover:text-black dark:group-hover:text-white shrink-0 transition-colors" strokeWidth={2} />
-                </div>
-                <div className={`flex items-center transition-all duration-300 overflow-hidden whitespace-nowrap ${isSidebarOpen ? 'opacity-100 w-[160px]' : 'opacity-0 w-0'}`}>
-                  <span className="text-[13px] font-bold flex-1 text-left text-black dark:text-white">Voice</span>
-                </div>
-              </button>
-            )}
+            <button className={`group flex items-center rounded-xl transition-all duration-300 h-9 ${isSidebarOpen ? 'hover:bg-black/5 dark:hover:bg-white/5 w-[calc(100%-16px)]' : 'hover:bg-black/5 dark:hover:bg-white/10 w-[40px]'} mx-2`}>
+              <div className="w-[40px] h-full flex items-center justify-center shrink-0">
+                <AudioLines className="w-[18px] h-[18px] text-black/70 dark:text-white/70 group-hover:text-black dark:group-hover:text-white shrink-0 transition-colors" strokeWidth={2} />
+              </div>
+              <div className={`flex items-center transition-all duration-300 overflow-hidden whitespace-nowrap ${isSidebarOpen ? 'opacity-100 w-[160px]' : 'opacity-0 w-0'}`}>
+                <span className="text-[13px] font-bold flex-1 text-left text-black dark:text-white">Voice</span>
+              </div>
+            </button>
 
             {/* Imagine */}
-            {status === "authenticated" && user?.email === 'johnkerveelayese@gmail.com' && (
+            {user?.email === 'johnkerveelayese@gmail.com' && (
               <button onClick={() => setIsImagineMode(!isImagineMode)} className={`group flex items-center rounded-xl transition-all duration-300 h-9 relative ${isImagineMode ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400' : 'hover:bg-black/5 dark:hover:bg-white/10'} ${isSidebarOpen ? 'w-[calc(100%-16px)]' : 'w-[40px]'} mx-2`}>
                 <div className="w-[40px] h-full flex items-center justify-center shrink-0">
                   <ImageIcon className="w-[18px] h-[18px] shrink-0 transition-colors" strokeWidth={2} />
@@ -1278,29 +1276,27 @@ export default function Chris() {
             )}
 
             {/* Projects */}
-            {status === "authenticated" && (
-              <>
-                <button className={`group flex items-center rounded-xl transition-all duration-300 h-9 ${isSidebarOpen ? 'hover:bg-black/5 dark:hover:bg-white/5 w-[calc(100%-16px)]' : 'hover:bg-black/5 dark:hover:bg-white/10 w-[40px]'} mx-2`}>
-                  <div className="w-[40px] h-full flex items-center justify-center shrink-0">
-                    <Folder className="w-[18px] h-[18px] text-black/70 dark:text-white/70 group-hover:text-black dark:group-hover:text-white shrink-0 transition-colors" strokeWidth={2} />
-                  </div>
-                  <div className={`flex items-center transition-all duration-300 overflow-hidden whitespace-nowrap ${isSidebarOpen ? 'opacity-100 w-[160px]' : 'opacity-0 w-0'}`}>
-                    <span className="text-[13px] font-bold flex-1 text-left text-black dark:text-white">Projects</span>
-                  </div>
-                </button>
-
-                {/* Sub-items */}
-                <div className={`transition-all duration-300 ease-in-out overflow-hidden flex flex-col gap-2 border-l border-white/10 ml-4 ${isSidebarOpen ? 'max-h-[80px] opacity-100 mt-1.5 pl-3 py-1' : 'max-h-0 opacity-0 mt-0 pl-0 py-0 border-transparent'}`}>
-                  <button className="flex items-center gap-2.5 w-full py-0.5 text-[13px] text-[#ff6b4a] hover:text-[#ff856b] transition-colors whitespace-nowrap">
-                    <Bell className="w-3.5 h-3.5 shrink-0" strokeWidth={2} />
-                    <span className="font-semibold">New Project</span>
-                  </button>
-                  <button className="flex items-center gap-2 w-full py-0.5 text-[12px] text-white/50 hover:text-white/70 transition-colors whitespace-nowrap">
-                    <span className="font-semibold">See all</span>
-                  </button>
+            <>
+              <button className={`group flex items-center rounded-xl transition-all duration-300 h-9 ${isSidebarOpen ? 'hover:bg-black/5 dark:hover:bg-white/5 w-[calc(100%-16px)]' : 'hover:bg-black/5 dark:hover:bg-white/10 w-[40px]'} mx-2`}>
+                <div className="w-[40px] h-full flex items-center justify-center shrink-0">
+                  <Folder className="w-[18px] h-[18px] text-black/70 dark:text-white/70 group-hover:text-black dark:group-hover:text-white shrink-0 transition-colors" strokeWidth={2} />
                 </div>
-              </>
-            )}
+                <div className={`flex items-center transition-all duration-300 overflow-hidden whitespace-nowrap ${isSidebarOpen ? 'opacity-100 w-[160px]' : 'opacity-0 w-0'}`}>
+                  <span className="text-[13px] font-bold flex-1 text-left text-black dark:text-white">Projects</span>
+                </div>
+              </button>
+
+              {/* Sub-items */}
+              <div className={`transition-all duration-300 ease-in-out overflow-hidden flex flex-col gap-2 border-l border-white/10 ml-4 ${isSidebarOpen ? 'max-h-[80px] opacity-100 mt-1.5 pl-3 py-1' : 'max-h-0 opacity-0 mt-0 pl-0 py-0 border-transparent'}`}>
+                <button className="flex items-center gap-2.5 w-full py-0.5 text-[13px] text-[#ff6b4a] hover:text-[#ff856b] transition-colors whitespace-nowrap">
+                  <Bell className="w-3.5 h-3.5 shrink-0" strokeWidth={2} />
+                  <span className="font-semibold">New Project</span>
+                </button>
+                <button className="flex items-center gap-2 w-full py-0.5 text-[12px] text-white/50 hover:text-white/70 transition-colors whitespace-nowrap">
+                  <span className="font-semibold">See all</span>
+                </button>
+              </div>
+            </>
           </div>
 
           {/* History */}
@@ -1316,12 +1312,7 @@ export default function Chris() {
             
             <div className={`transition-all duration-300 ease-in-out overflow-hidden flex-1 ${isSidebarOpen ? 'opacity-100 pl-4 border-l border-black/10 dark:border-white/10 ml-4 pr-1' : 'opacity-0 pl-0 border-transparent ml-0 pr-0'}`}>
               <div className="w-[180px]">
-                {status === "unauthenticated" ? (
-                  <div className="py-3 px-2 rounded-lg bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 text-center">
-                    <p className="text-[11px] text-black/50 dark:text-white/50 mb-2">Log in to save your chat history</p>
-                    <Link href="/login" className="text-[11px] font-bold text-black dark:text-white hover:underline">Log In</Link>
-                  </div>
-                ) : isLoadingHistory ? (
+                {isLoadingHistory ? (
                   <div className="flex justify-center py-4 text-black dark:text-white">
                     <Mirage size="30" speed="2.5" color="currentColor" />
                   </div>
@@ -1363,7 +1354,6 @@ export default function Chris() {
 
           {/* Bottom Section */}
           <div className={`relative mt-auto shrink-0 w-full transition-all duration-300 ease-in-out ${isSidebarOpen ? 'h-[56px]' : 'h-[88px]'}`}>
-            {status === "authenticated" ? (
               <Link 
                 href="/profile"
                 className={`absolute w-8 h-8 rounded-full bg-pink-500 text-white flex items-center justify-center font-medium text-sm cursor-pointer transition-all duration-300 ease-in-out ${
@@ -1375,18 +1365,6 @@ export default function Chris() {
               >
                 {user?.displayName?.[0] || user?.email?.[0] || "J"}
               </Link>
-            ) : (
-              <Link 
-                href="/login" 
-                className={`absolute w-8 h-8 rounded-full bg-white/10 text-white/50 flex items-center justify-center hover:bg-white/20 transition-all duration-300 ease-in-out ${
-                  isSidebarOpen 
-                    ? 'left-[12px] bottom-[12px] translate-x-0' 
-                    : 'left-[12px] bottom-[48px] translate-x-0'
-                }`}
-              >
-                <UserIcon className="w-4 h-4" />
-              </Link>
-            )}
             
             <button 
               onClick={() => setIsSidebarOpen(!isSidebarOpen)} 
@@ -1401,6 +1379,7 @@ export default function Chris() {
           </div>
         </div>
       </div>
+      )}
 
       {/* Image Preview Modal */}
       {previewImage && (
