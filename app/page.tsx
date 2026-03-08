@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { GoogleGenAI, Type, ThinkingLevel, FunctionDeclaration } from '@google/genai';
+import { GoogleGenAI, Type, ThinkingLevel, FunctionDeclaration, Modality } from '@google/genai';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -43,7 +43,8 @@ import {
   Info,
   TriangleAlert,
   Rocket,
-  Zap
+  Zap,
+  Square
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -318,6 +319,10 @@ export default function Chris() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [isPlayingAudio, setIsPlayingAudio] = useState<string | null>(null); // Stores the ID of the message currently playing
+  const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
+  const [interimTranscript, setInterimTranscript] = useState('');
   
   // --- Undo/Redo History ---
   const historyRef = useRef<string[]>(['']);
@@ -592,23 +597,25 @@ export default function Chris() {
       recognition.lang = 'en-US'; // Set language for better accuracy
 
       recognition.onresult = (event: any) => {
-        let finalTranscript = '';
+        let finalChunk = '';
+        let interimChunk = '';
 
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           if (event.results[i].isFinal) {
-            finalTranscript += event.results[i][0].transcript;
+            finalChunk += event.results[i][0].transcript;
+          } else {
+            interimChunk += event.results[i][0].transcript;
           }
         }
 
-        if (finalTranscript) {
-          const trimmed = finalTranscript.trim();
-          if (trimmed) {
-            setInput((prev) => {
-              const needsSpace = prev.length > 0 && !prev.endsWith(' ');
-              return prev + (needsSpace ? ' ' : '') + trimmed;
-            });
-          }
+        if (finalChunk) {
+          setInput((prev) => {
+            const needsSpace = prev.length > 0 && !prev.endsWith(' ');
+            return prev + (needsSpace ? ' ' : '') + finalChunk;
+          });
         }
+        
+        setInterimTranscript(interimChunk);
       };
 
       recognition.onerror = (event: any) => {
@@ -616,11 +623,18 @@ export default function Chris() {
         if (event.error === 'not-allowed') {
           addToast('Microphone access denied. Please allow permissions.', 'warning');
           setIsListening(false);
+        } else if (event.error === 'no-speech') {
+          // Ignore no-speech errors, just keep listening or let it retry
+          // But if it stops, onend will handle it
+        } else {
+           addToast(`Voice error: ${event.error}`, 'error');
+           setIsListening(false);
         }
       };
 
       recognition.onend = () => {
         setIsListening(false);
+        setInterimTranscript('');
       };
     }
 
@@ -636,15 +650,23 @@ export default function Chris() {
       setShowAuthModal(true);
       return;
     }
+
+    if (!recognitionRef.current) {
+      addToast('Speech recognition not supported in this browser.', 'error');
+      return;
+    }
+
     if (isListening) {
-      recognitionRef.current?.stop();
+      recognitionRef.current.stop();
       setIsListening(false);
     } else {
       try {
-        recognitionRef.current?.start();
+        recognitionRef.current.start();
         setIsListening(true);
       } catch (e) {
-        addToast('Microphone access denied. Please allow permissions.', 'warning');
+        console.error("Error starting speech recognition:", e);
+        setIsListening(false);
+        addToast('Failed to start voice input.', 'error');
       }
     }
   };
@@ -1223,13 +1245,77 @@ export default function Chris() {
     }
   };
 
-  const handleReadAloud = (text: string) => {
-    if (!window.speechSynthesis) {
-      addToast('Text-to-speech not supported', 'error');
+  const handleReadAloud = async (text: string, msgId: string) => {
+    // If currently playing this message, stop it
+    if (isPlayingAudio === msgId) {
+      if (currentAudioRef.current) {
+        currentAudioRef.current.pause();
+        currentAudioRef.current = null;
+      }
+      setIsPlayingAudio(null);
       return;
     }
-    const utterance = new SpeechSynthesisUtterance(text);
-    window.speechSynthesis.speak(utterance);
+
+    // If playing another message, stop it first
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause();
+      currentAudioRef.current = null;
+      setIsPlayingAudio(null);
+    }
+
+    try {
+      addToast('Generating speech...', 'info');
+      // Set state to indicate loading/playing for this message
+      setIsPlayingAudio(msgId);
+
+      const ai = getGenAI();
+      if (!ai) {
+        addToast('AI client not initialized', 'error');
+        setIsPlayingAudio(null);
+        return;
+      }
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash-preview-tts",
+        contents: [{ parts: [{ text: text.slice(0, 4000) }] }], // Limit text length to avoid issues
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: 'Kore' },
+            },
+          },
+        },
+      });
+
+      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+
+      if (base64Audio) {
+        const audio = new Audio(`data:audio/wav;base64,${base64Audio}`);
+        currentAudioRef.current = audio;
+        
+        audio.onended = () => {
+          setIsPlayingAudio(null);
+          currentAudioRef.current = null;
+        };
+        
+        audio.onerror = (e) => {
+          console.error("Audio playback error", e);
+          addToast("Error playing audio", "error");
+          setIsPlayingAudio(null);
+          currentAudioRef.current = null;
+        };
+
+        await audio.play();
+      } else {
+        addToast('Failed to generate speech', 'error');
+        setIsPlayingAudio(null);
+      }
+    } catch (error) {
+      console.error('TTS Error:', error);
+      addToast('Error generating speech', 'error');
+      setIsPlayingAudio(null);
+    }
   };
 
   const handleCopy = (text: string) => {
@@ -1749,8 +1835,27 @@ export default function Chris() {
               </div>
             ) : (
               <div className="max-w-3xl mx-auto w-full flex flex-col gap-6 md:gap-8">
-                {messages.map((msg) => (
-                <div key={msg.id} className={`flex flex-col group ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                {messages.map((msg, index) => {
+                  const isHovered = hoveredMessageId === msg.id;
+                  const isRelated = (() => {
+                    if (!hoveredMessageId) return false;
+                    const hoveredIndex = messages.findIndex(m => m.id === hoveredMessageId);
+                    if (hoveredIndex === -1) return false;
+                    const hoveredMsg = messages[hoveredIndex];
+                    if (hoveredMsg.role === 'ai' && index === hoveredIndex - 1) return true;
+                    if (hoveredMsg.role === 'user' && index === hoveredIndex + 1) return true;
+                    return false;
+                  })();
+                  
+                  const opacityClass = hoveredMessageId && !isHovered && !isRelated ? 'opacity-30 blur-[1px]' : 'opacity-100';
+
+                  return (
+                    <div 
+                      key={msg.id} 
+                      className={`flex flex-col group ${msg.role === 'user' ? 'items-end' : 'items-start'} ${opacityClass} transition-all duration-300 ease-in-out`}
+                      onMouseEnter={() => setHoveredMessageId(msg.id)}
+                      onMouseLeave={() => setHoveredMessageId(null)}
+                    >
                   <div
                     className={`max-w-[92%] md:max-w-[85%] px-4 py-3 md:px-5 md:py-3.5 ${
                       msg.role === 'user'
@@ -1928,11 +2033,11 @@ export default function Chris() {
                             <RefreshCw className="w-3.5 h-3.5" />
                           </button>
                           <button 
-                            onClick={() => handleReadAloud(msg.text)}
-                            className="p-1 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors" 
-                            title="Read Aloud"
+                            onClick={() => handleReadAloud(msg.text, msg.id)}
+                            className={`p-1 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors ${isPlayingAudio === msg.id ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20' : ''}`}
+                            title={isPlayingAudio === msg.id ? "Stop Reading" : "Read Aloud"}
                           >
-                            <Volume2 className="w-3.5 h-3.5" />
+                            {isPlayingAudio === msg.id ? <Square className="w-3.5 h-3.5 fill-current" /> : <Volume2 className="w-3.5 h-3.5" />}
                           </button>
                           <button 
                             onClick={() => handleCopy(msg.text)}
@@ -1992,8 +2097,9 @@ export default function Chris() {
                       </div>
                     )}
                   </div>
-                </div>
-              ))}
+                    </div>
+                  );
+                })}
             {isWaiting && (
               <div className="flex items-start justify-start w-full py-8 px-4 md:px-5 text-black dark:text-white">
                 <Mirage size="40" speed="2.5" color="currentColor" />
@@ -2051,10 +2157,18 @@ export default function Chris() {
 
                 <textarea
                   ref={textareaRef as any}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
+                  value={isListening ? (input + (input && !input.endsWith(' ') && interimTranscript ? ' ' : '') + interimTranscript) : input}
+                  onChange={(e) => {
+                    setInput(e.target.value);
+                    // If user types manually while listening, stop listening to avoid conflicts
+                    if (isListening) {
+                      recognitionRef.current?.stop();
+                      setIsListening(false);
+                      setInterimTranscript('');
+                    }
+                  }}
                   onKeyDown={handleKeyDown}
-                  placeholder="Reply to Chris..."
+                  placeholder={isListening ? "Listening..." : "Reply to Chris..."}
                   className="flex-1 bg-transparent resize-none outline-none text-[15px] placeholder:text-black/30 dark:placeholder:text-white/30 min-h-[20px] max-h-[200px] text-black dark:text-white no-scrollbar py-1.5"
                   rows={1}
                 />
