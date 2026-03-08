@@ -228,6 +228,7 @@ export default function Chris() {
   const [input, setInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isWaiting, setIsWaiting] = useState(false);
+  const [isLoadingChat, setIsLoadingChat] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isThinkMode, setIsThinkMode] = useState(false);
   const [isDeepSearchMode, setIsDeepSearchMode] = useState(false);
@@ -370,7 +371,7 @@ export default function Chris() {
 
   async function loadChat(chatId: string) {
     setCurrentChatId(chatId);
-    setIsGenerating(true);
+    setIsLoadingChat(true);
     try {
       const messagesRef = collection(db, "chats", chatId, "messages");
       const q = query(messagesRef, orderBy("createdAt", "asc"));
@@ -380,6 +381,8 @@ export default function Chris() {
         role: doc.data().role,
         text: doc.data().text,
         file: doc.data().file,
+        mapLocation: doc.data().mapLocation,
+        groundingChunks: doc.data().groundingChunks,
         createdAt: doc.data().createdAt?.toDate() || new Date()
       }));
       setMessages(loadedMessages);
@@ -389,7 +392,7 @@ export default function Chris() {
     } catch (error) {
       handleFirestoreError(error, OperationType.LIST, `chats/${chatId}/messages`);
     } finally {
-      setIsGenerating(false);
+      setIsLoadingChat(false);
     }
     if (window.innerWidth < 768) setIsSidebarOpen(false);
   };
@@ -1618,8 +1621,15 @@ export default function Chris() {
           </header>
 
           <div className="px-3 md:px-8 pt-6 md:pt-8 pb-16 md:pb-20">
-            <div className="max-w-3xl mx-auto w-full flex flex-col gap-6 md:gap-8">
-              {messages.map((msg) => (
+            {isLoadingChat ? (
+              <div className="flex h-[50vh] w-full items-center justify-center">
+                <div className="animate-pulse">
+                  <PlanetLogo className="w-12 h-12 text-black dark:text-white" />
+                </div>
+              </div>
+            ) : (
+              <div className="max-w-3xl mx-auto w-full flex flex-col gap-6 md:gap-8">
+                {messages.map((msg) => (
                 <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                   <div
                     className={`max-w-[92%] md:max-w-[85%] px-4 py-3 md:px-5 md:py-3.5 ${
@@ -1862,6 +1872,7 @@ export default function Chris() {
             )}
             <div ref={messagesEndRef} />
           </div>
+        )}
         </div>
         </div>
 
