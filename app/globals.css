@@ -1,0 +1,46 @@
+@import "tailwindcss";
+@variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  button {
+    cursor: pointer;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  
+  .premium-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .premium-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .premium-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 10px;
+  }
+  .dark .premium-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+  }
+  .premium-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.2);
+  }
+  .dark .premium-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+  .premium-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0, 0, 0, 0.1) transparent;
+  }
+  .dark .premium-scrollbar {
+    scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+  }
+}

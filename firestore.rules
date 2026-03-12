@@ -1,0 +1,73 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Fields: uid, email, displayName, photoURL, createdAt
+    //
+    // Collection: chats
+    // Fields: id, userId, title, createdAt, updatedAt
+    //
+    // Collection: messages (subcollection of chats)
+    // Fields: id, role, text, createdAt, file
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isChatOwner(chatId) {
+      return isAuthenticated() && request.auth.uid == get(/databases/$(database)/documents/chats/$(chatId)).data.userId;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid']) &&
+             data.uid is string && data.uid.size() > 0 &&
+             (!('email' in data) || (data.email is string && data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$")));
+    }
+
+    function isValidChat(data) {
+      return data.keys().hasAll(['id', 'userId', 'title', 'createdAt', 'updatedAt']) &&
+             data.id is string && data.userId == request.auth.uid &&
+             data.title is string && data.title.size() <= 100;
+    }
+
+    function isValidMessage(data) {
+      return data.keys().hasAll(['id', 'role', 'text', 'createdAt']) &&
+             data.role in ['user', 'ai'] &&
+             data.text is string && data.text.size() <= 10000;
+    }
+
+    // Rules
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidUser(request.resource.data);
+    }
+
+    match /chats/{chatId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && isValidChat(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && isValidChat(request.resource.data);
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+
+      match /messages/{messageId} {
+        allow read: if isChatOwner(chatId);
+        allow create: if isChatOwner(chatId) && isValidMessage(request.resource.data);
+      }
+    }
+
+    // Default deny
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}

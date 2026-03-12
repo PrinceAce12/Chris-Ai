@@ -1,0 +1,8 @@
+{
+  "name": "Chris",
+  "description": "A production-ready Ai Assistant ChrisAi.",
+  "requestFramePermissions": [
+    "microphone",
+    "geolocation"
+  ]
+}
